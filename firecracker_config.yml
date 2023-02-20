@@ -1,0 +1,14 @@
+{
+  "boot-source": {
+    "kernel_image_path": "/kernel/vmlinux",
+    "boot_args": "console=ttyS0 reboot=k panic=1 pci=off"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "rootfs/rootfs.ext4",
+      "is_root_device": true,
+      "is_read_only": false
+    }
+  ]
+}

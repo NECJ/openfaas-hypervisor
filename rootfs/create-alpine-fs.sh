@@ -3,18 +3,21 @@
 apk add openrc
 apk add util-linux
 
-# Set up a login terminal on the serial console (ttyS0):
-ln -s agetty /etc/init.d/agetty.ttyS0
+# Set up a terminal on the serial console (ttyS0):
+echo "agetty_options=\"--autologin root --noclear\"" > /etc/conf.d/agetty-autologin
+ln -s agetty /etc/init.d/agetty-autologin.ttyS0
 echo ttyS0 > /etc/securetty
-rc-update add agetty.ttyS0 default
+rc-update add agetty-autologin.ttyS0 default
 
 # Make sure special file systems are mounted on boot:
 rc-update add devfs boot
 rc-update add procfs boot
 rc-update add sysfs boot
 
+rc-update add local default
+
 # Then, copy the newly configured system to the rootfs image:
-for d in bin etc lib root sbin usr; do tar c "$d" | tar x -C /my-rootfs; done
+for d in bin etc lib root sbin usr; do tar c "/$d" | tar x -C /my-rootfs; done
 
 # The above command may trigger the following message:
 # tar: Removing leading "/" from member names

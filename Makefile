@@ -1,3 +1,6 @@
+firecracker:
+	./install_firecracker.sh
+
 network: bridge tap
 
 network_clean: bridge_clean tap_clean

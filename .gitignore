@@ -1,3 +1,3 @@
 firecracker
-rootfs/rootfs.ext4
-kernel/vmlinux
+vm/rootfs/rootfs.ext4
+vm/kernel/vmlinux

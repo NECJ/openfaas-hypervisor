@@ -77,12 +77,22 @@ func main() {
 	}
 }
 
-func invokeFunction(w http.ResponseWriter, r *http.Request) {
+func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	functionInstance := getReadyInstance()
-	fmt.Printf("IP of ready instance: %s\n", functionInstance.ip)
 
-	fmt.Printf("Fake Invoke!!!\n")
-	time.Sleep(2 * time.Second)
+	res, err := http.Get("http://" + functionInstance.ip + ":8080/invoke")
+	if err != nil {
+		fmt.Printf("Error invoking function: %s\n", err)
+		http.Error(w, "Error invoking function", http.StatusInternalServerError)
+		os.Exit(1)
+	}
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		log.Printf("Error reading function response: %v", err)
+		http.Error(w, "Error reading function response", http.StatusInternalServerError)
+		return
+	}
+	w.Write(body)
 
 	setInstanceReady(functionInstance)
 }

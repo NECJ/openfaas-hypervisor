@@ -9,6 +9,7 @@ docker run -it --rm \
     -v $(pwd)/init_rootfs.sh:/init_rootfs.sh \
     -v /tmp/my-rootfs:/my-rootfs \
     -v $(pwd)/ready.sh:/etc/local.d/ready.start \
+    -v $(pwd)/server:/bin/server \
     alpine /init_rootfs.sh
 
 sudo umount /tmp/my-rootfs

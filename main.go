@@ -32,8 +32,6 @@ const (
 var functionInstanceMetadata map[string]InstanceMetadata = make(map[string]InstanceMetadata)
 var readyFunctionInstances = list.New()
 var readyFunctionInstancesMutex sync.Mutex
-var runningFunctionInstances = list.New()
-var runningFunctionInstancesMutex sync.Mutex
 var functionReadyChan = make(chan string)
 
 var firecrackerBinPath string
@@ -81,13 +79,12 @@ func main() {
 
 func invokeFunction(w http.ResponseWriter, r *http.Request) {
 	functionInstance := getReadyInstance()
-	runningListElement := setInstanceRunning(functionInstance)
 	fmt.Printf("IP of ready instance: %s\n", functionInstance.ip)
 
 	fmt.Printf("Fake Invoke!!!\n")
 	time.Sleep(2 * time.Second)
 
-	setInstanceReady(runningListElement)
+	setInstanceReady(functionInstance)
 }
 
 // Get a ready function instance and removes it from the ready list
@@ -97,9 +94,9 @@ func getReadyInstance() InstanceMetadata {
 		readyFunctionInstancesMutex.Lock()
 		readyInstance = readyFunctionInstances.Front()
 		if readyInstance == nil {
-			// unlock mutex, create new instance and wait for it to be ready
 			readyFunctionInstancesMutex.Unlock()
 			provisionFunctionInstance()
+			// wait for it to be ready
 			<-functionReadyChan
 		} else {
 			readyFunctionInstances.Remove(readyInstance)
@@ -109,22 +106,9 @@ func getReadyInstance() InstanceMetadata {
 	return readyInstance.Value.(InstanceMetadata)
 }
 
-func setInstanceRunning(instance InstanceMetadata) *list.Element {
-	runningFunctionInstancesMutex.Lock()
-	listElement := runningFunctionInstances.PushBack(instance)
-	runningFunctionInstancesMutex.Unlock()
-	return listElement
-}
-
-func setInstanceReady(runningListItem *list.Element) {
-	// remove it from running list
-	runningFunctionInstancesMutex.Lock()
-	runningFunctionInstances.Remove(runningListItem)
-	runningFunctionInstancesMutex.Unlock()
-
-	// add it to ready list
+func setInstanceReady(functionInstance InstanceMetadata) {
 	readyFunctionInstancesMutex.Lock()
-	readyFunctionInstances.PushBack(runningListItem.Value)
+	readyFunctionInstances.PushBack(functionInstance)
 	readyFunctionInstancesMutex.Unlock()
 }
 
@@ -137,7 +121,9 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	}
 	timeElapsed := functionInstanceMetadata[instanceIP].vmReadyTime.Sub(functionInstanceMetadata[instanceIP].vmStartTime)
 	fmt.Printf("Function ready to be invoked after %s\n", timeElapsed)
+	readyFunctionInstancesMutex.Lock()
 	readyFunctionInstances.PushBack(functionInstanceMetadata[instanceIP])
+	readyFunctionInstancesMutex.Unlock()
 	functionReadyChan <- instanceIP
 }
 

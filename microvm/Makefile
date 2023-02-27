@@ -1,7 +1,7 @@
-all: kernel rootfs
+all: vmlinux rootfs.ext4
 
-kernel:
+vmlinux:
 	./build_kernel.sh
 
-rootfs:
+rootfs.ext4:
 	./build_rootfs.sh

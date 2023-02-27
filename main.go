@@ -36,6 +36,9 @@ const (
 var functionInstanceMetadata map[string]InstanceMetadata = make(map[string]InstanceMetadata)
 var readyFunctionInstances = list.New()
 var runningFunctionInstances = list.New()
+var firecrackerBinPath string
+var cniConfDir string
+var cniBinPath []string
 
 func main() {
 
@@ -50,6 +53,17 @@ func main() {
 	if x, y := 0, os.Getuid(); x != y {
 		log.Fatal("Root acccess denied")
 	}
+
+	// Get path to firecracker binary
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	firecrackerBinPath = filepath.Join(dir, "firecracker")
+
+	// setup cni paths
+	cniConfDir = filepath.Join(dir, "cni/config")
+	cniBinPath = []string{filepath.Join(dir, "cni/bin")} // CNI binaries
 
 	http.HandleFunc("/invoke", invokeFunction)
 	http.HandleFunc("/ready", registerInstanceReady)
@@ -85,13 +99,6 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 func provisionFunctionInstance() {
 	ctx := context.Background()
 
-	// Get path to firecracker binary
-	dir, err := os.Getwd()
-	if err != nil {
-		log.Fatal(err)
-	}
-	firecrackerBinPath := filepath.Join(dir, "firecracker")
-
 	// Setup socket path
 	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-vm")
 	if err != nil {
@@ -99,10 +106,6 @@ func provisionFunctionInstance() {
 	}
 	socketPath := filepath.Join(tempdir, "socket")
 	cmd := firecracker.VMCommandBuilder{}.WithSocketPath(socketPath).WithBin(firecrackerBinPath).Build(ctx)
-
-	// setup cni paths
-	cniConfDir := filepath.Join(dir, "cni/config")
-	cniBinPath := []string{filepath.Join(dir, "cni/bin")} // CNI binaries
 
 	networkInterfaces := []firecracker.NetworkInterface{{
 		CNIConfiguration: &firecracker.CNIConfiguration{

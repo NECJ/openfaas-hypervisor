@@ -1,0 +1,37 @@
+{
+    "client": "Thunder Client",
+    "collectionName": "openfaas-hypervisor",
+    "dateExported": "2023-02-27T10:25:51.892Z",
+    "version": "1.1",
+    "folders": [],
+    "requests": [
+        {
+            "_id": "160a9b46-6558-4080-bd72-6c43f7519b88",
+            "colId": "d76aca42-701d-4543-b292-521293f040ca",
+            "containerId": "",
+            "name": "invoke",
+            "url": "localhost:8080/invoke",
+            "method": "POST",
+            "sortNum": 10000,
+            "created": "2023-02-22T10:01:19.072Z",
+            "modified": "2023-02-22T10:01:38.530Z",
+            "headers": [],
+            "params": [],
+            "tests": []
+        },
+        {
+            "_id": "ce8f7a07-de2f-40db-9084-2f29ff8b9d87",
+            "colId": "d76aca42-701d-4543-b292-521293f040ca",
+            "containerId": "",
+            "name": "funcReady",
+            "url": "localhost:8080/funcReady",
+            "method": "POST",
+            "sortNum": 20000,
+            "created": "2023-02-26T21:01:54.334Z",
+            "modified": "2023-02-26T21:02:41.571Z",
+            "headers": [],
+            "params": [],
+            "tests": []
+        }
+    ]
+}

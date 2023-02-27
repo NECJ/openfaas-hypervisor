@@ -8,7 +8,7 @@ sudo mount rootfs.ext4 /tmp/my-rootfs
 docker run -it --rm \
     -v $(pwd)/create-alpine-fs.sh:/create-alpine-fs.sh \
     -v /tmp/my-rootfs:/my-rootfs \
-    -v $(pwd)/setup_vm_networking.sh:/etc/local.d/setup_vm_networking.start \
+    -v $(pwd)/ready.sh:/etc/local.d/ready.start \
     alpine /create-alpine-fs.sh
 
 sudo umount /tmp/my-rootfs

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 
 	// "io/ioutil"
 
@@ -17,7 +18,9 @@ import (
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"golang.org/x/sys/unix"
 
+	"container/list"
 	"io/ioutil"
+	"time"
 )
 
 const (
@@ -29,8 +32,10 @@ const (
 	ifName      = "veth0"
 )
 
-// Maps from function name to firecracker socket
-var functionInstances map[string]int
+// Maps from function instance IP to function metadata
+var functionInstanceMetadata map[string]InstanceMetadata = make(map[string]InstanceMetadata)
+var readyFunctionInstances = list.New()
+var runningFunctionInstances = list.New()
 
 func main() {
 
@@ -47,6 +52,7 @@ func main() {
 	}
 
 	http.HandleFunc("/invoke", invokeFunction)
+	http.HandleFunc("/ready", registerInstanceReady)
 
 	fmt.Printf("Server up!!\n")
 	err = http.ListenAndServe(":8080", nil)
@@ -62,11 +68,21 @@ func main() {
 func invokeFunction(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Provisioning function instance\n")
 	provisionFunctionInstance()
-	fmt.Printf("Function instance provisioned")
+	fmt.Printf("Function instance provisioned\n")
+}
+
+// Register that a function VM has booted and is ready to be invoked
+func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
+	instanceIP := strings.Split((*r).RemoteAddr, ":")[0]
+	if metadata, ok := functionInstanceMetadata[instanceIP]; ok {
+		metadata.vmReadyTime = time.Now()
+		functionInstanceMetadata[instanceIP] = metadata
+	}
+	timeElapsed := functionInstanceMetadata[instanceIP].vmReadyTime.Sub(functionInstanceMetadata[instanceIP].vmStartTime)
+	fmt.Printf("Function ready to be invoked after %s\n", timeElapsed)
 }
 
 func provisionFunctionInstance() {
-
 	ctx := context.Background()
 
 	// Get path to firecracker binary
@@ -114,10 +130,18 @@ func provisionFunctionInstance() {
 		panic(fmt.Errorf("failed to create new machine: %v", err))
 	}
 
+	metadata := InstanceMetadata{vmStartTime: time.Now()}
 	if err := m.Start(ctx); err != nil {
 		panic(fmt.Errorf("failed to initialize machine: %v", err))
 	}
 
-	vmIP := m.Cfg.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.IP.String()
-	fmt.Printf("IP of VM: %v\n", vmIP)
+	metadata.ip = m.Cfg.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.IP.String()
+	functionInstanceMetadata[metadata.ip] = metadata
+}
+
+// InstanceMetadata holds information about each function instance (VM)
+type InstanceMetadata struct {
+	ip          string
+	vmStartTime time.Time
+	vmReadyTime time.Time
 }

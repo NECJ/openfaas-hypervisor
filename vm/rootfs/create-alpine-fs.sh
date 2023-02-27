@@ -2,6 +2,7 @@
 
 apk add openrc
 apk add util-linux
+apk add curl
 
 # Set up a terminal on the serial console (ttyS0):
 echo "agetty_options=\"--autologin root --noclear\"" > /etc/conf.d/agetty-autologin

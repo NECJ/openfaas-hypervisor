@@ -1,1 +1,0 @@
-docker run -it -v $(pwd):/output kernel-build

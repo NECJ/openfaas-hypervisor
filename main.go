@@ -1,26 +1,22 @@
 package main
 
 import (
-	// "encoding/json"
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
-	"path/filepath"
-	"strings"
-
-	// "io/ioutil"
-
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"golang.org/x/sys/unix"
-
-	"container/list"
-	"io/ioutil"
-	"time"
 )
 
 const (
@@ -35,7 +31,11 @@ const (
 // Maps from function instance IP to function metadata
 var functionInstanceMetadata map[string]InstanceMetadata = make(map[string]InstanceMetadata)
 var readyFunctionInstances = list.New()
+var readyFunctionInstancesMutex sync.Mutex
 var runningFunctionInstances = list.New()
+var runningFunctionInstancesMutex sync.Mutex
+var functionReadyChan = make(chan string)
+
 var firecrackerBinPath string
 var cniConfDir string
 var cniBinPath []string
@@ -80,9 +80,48 @@ func main() {
 }
 
 func invokeFunction(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("Provisioning function instance\n")
-	provisionFunctionInstance()
-	fmt.Printf("Function instance provisioned\n")
+	readyInstance, runningListItem := getReadyInstance()
+	fmt.Printf("IP of ready instance: %s\n", readyInstance.ip)
+
+	fmt.Printf("Fake Invoke!!!\n")
+	time.Sleep(2 * time.Second)
+
+	setInstanceReady(runningListItem)
+}
+
+// Get a ready function instance and set it as running
+func getReadyInstance() (InstanceMetadata, *list.Element) {
+	var readyInstance *list.Element = nil
+	var runningListItem *list.Element = nil
+	for readyInstance == nil {
+		readyFunctionInstancesMutex.Lock()
+		readyInstance = readyFunctionInstances.Front()
+		if readyInstance == nil {
+			// unlock mutex, create new instance and wait for it to be ready
+			readyFunctionInstancesMutex.Unlock()
+			provisionFunctionInstance()
+			<-functionReadyChan
+		} else {
+			readyFunctionInstances.Remove(readyInstance)
+			runningFunctionInstancesMutex.Lock()
+			runningListItem = runningFunctionInstances.PushBack(readyInstance.Value)
+			runningFunctionInstancesMutex.Unlock()
+			readyFunctionInstancesMutex.Unlock()
+		}
+	}
+	return readyInstance.Value.(InstanceMetadata), runningListItem
+}
+
+func setInstanceReady(runningListItem *list.Element) {
+	// remove it from running list
+	runningFunctionInstancesMutex.Lock()
+	runningFunctionInstances.Remove(runningListItem)
+	runningFunctionInstancesMutex.Unlock()
+
+	// add it to ready list
+	readyFunctionInstancesMutex.Lock()
+	readyFunctionInstances.PushBack(runningListItem.Value)
+	readyFunctionInstancesMutex.Unlock()
 }
 
 // Register that a function VM has booted and is ready to be invoked
@@ -94,6 +133,8 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	}
 	timeElapsed := functionInstanceMetadata[instanceIP].vmReadyTime.Sub(functionInstanceMetadata[instanceIP].vmStartTime)
 	fmt.Printf("Function ready to be invoked after %s\n", timeElapsed)
+	readyFunctionInstances.PushBack(functionInstanceMetadata[instanceIP])
+	functionReadyChan <- instanceIP
 }
 
 func provisionFunctionInstance() {
@@ -105,6 +146,7 @@ func provisionFunctionInstance() {
 		log.Fatal(err)
 	}
 	socketPath := filepath.Join(tempdir, "socket")
+
 	cmd := firecracker.VMCommandBuilder{}.WithSocketPath(socketPath).WithBin(firecrackerBinPath).Build(ctx)
 
 	networkInterfaces := []firecracker.NetworkInterface{{

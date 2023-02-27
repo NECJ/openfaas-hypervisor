@@ -165,7 +165,7 @@ func provisionFunctionInstance() {
 		Drives:          firecracker.NewDrivesBuilder(rootfsPath).Build(),
 		MachineCfg: models.MachineConfiguration{
 			VcpuCount:  firecracker.Int64(1),
-			MemSizeMib: firecracker.Int64(2048),
+			MemSizeMib: firecracker.Int64(58),
 		},
 		NetworkInterfaces: networkInterfaces,
 	}

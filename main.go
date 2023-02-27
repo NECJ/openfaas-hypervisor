@@ -80,19 +80,19 @@ func main() {
 }
 
 func invokeFunction(w http.ResponseWriter, r *http.Request) {
-	readyInstance, runningListItem := getReadyInstance()
-	fmt.Printf("IP of ready instance: %s\n", readyInstance.ip)
+	functionInstance := getReadyInstance()
+	runningListElement := setInstanceRunning(functionInstance)
+	fmt.Printf("IP of ready instance: %s\n", functionInstance.ip)
 
 	fmt.Printf("Fake Invoke!!!\n")
 	time.Sleep(2 * time.Second)
 
-	setInstanceReady(runningListItem)
+	setInstanceReady(runningListElement)
 }
 
-// Get a ready function instance and set it as running
-func getReadyInstance() (InstanceMetadata, *list.Element) {
+// Get a ready function instance and removes it from the ready list
+func getReadyInstance() InstanceMetadata {
 	var readyInstance *list.Element = nil
-	var runningListItem *list.Element = nil
 	for readyInstance == nil {
 		readyFunctionInstancesMutex.Lock()
 		readyInstance = readyFunctionInstances.Front()
@@ -103,13 +103,17 @@ func getReadyInstance() (InstanceMetadata, *list.Element) {
 			<-functionReadyChan
 		} else {
 			readyFunctionInstances.Remove(readyInstance)
-			runningFunctionInstancesMutex.Lock()
-			runningListItem = runningFunctionInstances.PushBack(readyInstance.Value)
-			runningFunctionInstancesMutex.Unlock()
 			readyFunctionInstancesMutex.Unlock()
 		}
 	}
-	return readyInstance.Value.(InstanceMetadata), runningListItem
+	return readyInstance.Value.(InstanceMetadata)
+}
+
+func setInstanceRunning(instance InstanceMetadata) *list.Element {
+	runningFunctionInstancesMutex.Lock()
+	listElement := runningFunctionInstances.PushBack(instance)
+	runningFunctionInstancesMutex.Unlock()
+	return listElement
 }
 
 func setInstanceReady(runningListItem *list.Element) {

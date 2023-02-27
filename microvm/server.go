@@ -35,5 +35,14 @@ func main() {
 func ready(w http.ResponseWriter, r *http.Request) {}
 
 func invoke(w http.ResponseWriter, r *http.Request) {
-	io.WriteString(w, "3.1415!!!\n")
+	// compute pi
+	// reps := 4000000000
+	// result := 3.0
+	// op := 1
+	// for i := 2; i < 2*reps+1; i += 2 {
+	// 	result += 4.0 / float64(i*(i+1)*(i+2)*op)
+	// 	op *= -1
+	// }
+	// io.WriteString(w, fmt.Sprintf("%f", result))
+	io.WriteString(w, "3.1415")
 }

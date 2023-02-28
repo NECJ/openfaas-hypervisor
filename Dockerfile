@@ -1,5 +1,9 @@
-from alpine
+FROM alpine
 
-copy ./ /
+COPY firecracker /
+COPY openfaas_hypervisor /
+COPY cni /cni
+COPY microvm/rootfs.ext4 /microvm/rootfs.ext4
+COPY microvm/vmlinux /microvm/vmlinux
 
-cmd ["/openfaas_hypervisor"]
+CMD ["/openfaas_hypervisor"]

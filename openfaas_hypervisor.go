@@ -67,7 +67,7 @@ func main() {
 	http.HandleFunc("/ready", registerInstanceReady)
 
 	fmt.Printf("Server up!!\n")
-	err = http.ListenAndServe("", nil)
+	err = http.ListenAndServe(":8080", nil)
 
 	if errors.Is(err, http.ErrServerClosed) {
 		fmt.Printf("server closed\n")
@@ -80,7 +80,7 @@ func main() {
 func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	functionInstance := getReadyInstance()
 
-	res, err := http.Get("http://" + functionInstance.ip + "/invoke")
+	res, err := http.Get("http://" + functionInstance.ip + ":8080/invoke")
 	if err != nil {
 		fmt.Printf("Error invoking function: %s\n", err)
 		http.Error(w, "Error invoking function", http.StatusInternalServerError)

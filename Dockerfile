@@ -1,5 +1,5 @@
-from ubuntu
+from alpine
 
 copy ./ /
 
-cmd ["/main"]
+cmd ["/openfaas_hypervisor"]

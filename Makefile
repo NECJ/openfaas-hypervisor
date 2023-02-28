@@ -7,7 +7,7 @@ microvm-files:
 	$(MAKE) -C microvm all
 
 openfaas_hypervisor:
-	go build openfaas_hypervisor.go
+	CGO_ENABLED=0 go build openfaas_hypervisor.go
 
 run: all
 	sudo ./openfaas_hypervisor

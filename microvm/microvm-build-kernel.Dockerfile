@@ -14,7 +14,7 @@ wget -O .config https://raw.githubusercontent.com/firecracker-microvm/firecracke
 cd linux-5.10/\n\
 cp ../.config ./\n\
 # Build kernel\n\
-yes "" | make vmlinux -j8\n\
+yes "" | make vmlinux -j$(grep -c processor /proc/cpuinfo)\n\
 mv vmlinux /output\n\
 ' > /build.sh
 

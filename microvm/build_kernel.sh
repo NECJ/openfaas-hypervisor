@@ -1,1 +1,0 @@
-docker run -it -v $(pwd):/output microvm-build-kernel

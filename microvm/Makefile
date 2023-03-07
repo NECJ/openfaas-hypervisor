@@ -20,3 +20,6 @@ rootfs.ext4:
 		alpine /init_rootfs.sh
 	sudo umount /tmp/my-rootfs
 	rm -r /tmp/my-rootfs
+
+clean:
+	rm -f vmlinux rootfs.ext4 server

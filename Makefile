@@ -15,3 +15,7 @@ docker-build:
 docker-push: docker-build
 	docker tag openfaas-hypervisor:latest public.ecr.aws/t7r4r6l6/openfaas-hypervisor:latest
 	docker push public.ecr.aws/t7r4r6l6/openfaas-hypervisor:latest
+
+clean:
+	rm -f openfaas_hypervisor
+	$(MAKE) -C microvm clean

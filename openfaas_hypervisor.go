@@ -78,6 +78,7 @@ func main() {
 }
 
 func invokeFunction(w http.ResponseWriter, req *http.Request) {
+	start := time.Now()
 	functionInstance := getReadyInstance()
 
 	res, err := http.Get("http://" + functionInstance.ip + ":8080/invoke")
@@ -95,6 +96,8 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	w.Write(body)
 
 	setInstanceReady(functionInstance)
+	elapsed := time.Since(start)
+	fmt.Printf("Function invoke took: %s\n", elapsed)
 }
 
 // Get a ready function instance and removes it from the ready list

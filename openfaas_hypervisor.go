@@ -2,20 +2,18 @@ package main
 
 import (
 	"container/list"
-	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/firecracker-microvm/firecracker-go-sdk"
-	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"golang.org/x/sys/unix"
 )
 
@@ -141,49 +139,13 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func provisionFunctionInstance() {
-	ctx := context.Background()
-
-	// Setup socket path
-	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-vm")
+	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `bridge,id=en0,br=virbr0`, `-device`, `virtio-net-pci,netdev=en0`, `-kernel`, `unikernel/build/unikernel_kvm-x86_64`, `-append`, `netdev.ipv4_addr=172.44.0.2 netdev.ipv4_gw_addr=172.44.0.1 netdev.ipv4_subnet_mask=255.255.255.0 --`, `-cpu`, `host`, `-enable-kvm`, `-serial`, `none`, `-parallel`, `none`, `-monitor`, `none`, `-display`, `none`, `-vga`, `none`, `-daemonize`)
+	metadata := InstanceMetadata{vmStartTime: time.Now()}
+	err := targetCmd.Start()
 	if err != nil {
 		log.Fatal(err)
 	}
-	socketPath := filepath.Join(tempdir, "socket")
-
-	cmd := firecracker.VMCommandBuilder{}.WithSocketPath(socketPath).WithBin(firecrackerBinPath).Build(ctx)
-
-	networkInterfaces := []firecracker.NetworkInterface{{
-		CNIConfiguration: &firecracker.CNIConfiguration{
-			NetworkName: networkName,
-			IfName:      ifName,
-			ConfDir:     cniConfDir,
-			BinPath:     cniBinPath,
-			VMIfName:    "eth0",
-		},
-	}}
-
-	cfg := firecracker.Config{
-		SocketPath:      socketPath,
-		KernelImagePath: kernelImagePath,
-		Drives:          firecracker.NewDrivesBuilder(rootfsPath).Build(),
-		MachineCfg: models.MachineConfiguration{
-			VcpuCount:  firecracker.Int64(1),
-			MemSizeMib: firecracker.Int64(58),
-		},
-		NetworkInterfaces: networkInterfaces,
-	}
-
-	m, err := firecracker.NewMachine(ctx, cfg, firecracker.WithProcessRunner(cmd))
-	if err != nil {
-		panic(fmt.Errorf("failed to create new machine: %v", err))
-	}
-
-	metadata := InstanceMetadata{vmStartTime: time.Now()}
-	if err := m.Start(ctx); err != nil {
-		panic(fmt.Errorf("failed to initialize machine: %v", err))
-	}
-
-	metadata.ip = m.Cfg.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.IP.String()
+	metadata.ip = "172.44.0.2"
 	functionInstanceMetadata[metadata.ip] = metadata
 }
 

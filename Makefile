@@ -10,11 +10,11 @@ openfaas_hypervisor:
 	CGO_ENABLED=0 go build openfaas_hypervisor.go
 
 docker-build:
-	docker build -t openfaas-hypervisor .
+	docker build -t openfaas-hypervisor:microvm .
 
 docker-push: docker-build
-	docker tag openfaas-hypervisor:latest public.ecr.aws/t7r4r6l6/openfaas-hypervisor:latest
-	docker push public.ecr.aws/t7r4r6l6/openfaas-hypervisor:latest
+	docker tag openfaas-hypervisor:microvm public.ecr.aws/t7r4r6l6/openfaas-hypervisor:microvm
+	docker push public.ecr.aws/t7r4r6l6/openfaas-hypervisor:microvm
 
 clean:
 	rm -f openfaas_hypervisor

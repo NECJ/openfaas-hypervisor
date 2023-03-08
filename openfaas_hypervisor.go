@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -50,16 +49,38 @@ func main() {
 		log.Fatal("Root acccess denied")
 	}
 
-	// Get path to firecracker binary
-	dir, err := os.Getwd()
+	// setup network bridge
+	createBridgeCmd := exec.Command(`brctl`, `addbr`, `virbr0`)
+	err = createBridgeCmd.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
-	firecrackerBinPath = filepath.Join(dir, "firecracker")
 
-	// setup cni paths
-	cniConfDir = filepath.Join(dir, "cni/config")
-	cniBinPath = []string{filepath.Join(dir, "cni/bin")} // CNI binaries
+	addIpCmd := exec.Command(`ip`, `a`, `a`, `172.44.0.1/24`, `dev`, `virbr0`)
+	err = addIpCmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	upCmd := exec.Command(`ip`, `l`, `set`, `dev`, `virbr0`, `up`)
+	err = upCmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer func() {
+		downCmd := exec.Command(`ip`, `l`, `set`, `dev`, `virbr0`, `down`)
+		err = downCmd.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		deleteBridgeCmd := exec.Command(`brctl`, `delbr`, `virbr0`)
+		err = deleteBridgeCmd.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
 
 	http.HandleFunc("/invoke", invokeFunction)
 	http.HandleFunc("/ready", registerInstanceReady)

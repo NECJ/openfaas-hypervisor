@@ -1,9 +1,11 @@
 FROM alpine
 
-COPY firecracker /
+# Give permission for QMEU to use bridge
+RUN mkdir /etc/qemu
+RUN echo "allow virbr0" >> /etc/qemu/bridge.conf
+
+RUN apk add qemu-system-x86_64
 COPY openfaas_hypervisor /
-COPY cni /cni
-COPY microvm/rootfs.ext4 /microvm/rootfs.ext4
-COPY microvm/vmlinux /microvm/vmlinux
+COPY unikernel/build/unikernel_kvm-x86_64 /unikernel/build/unikernel_kvm-x86_64
 
 CMD ["/openfaas_hypervisor"]

@@ -1,10 +1,10 @@
-all: firecracker microvm-files openfaas_hypervisor docker-build
+all: firecracker unikernel-files openfaas_hypervisor docker-build
 
 firecracker:
 	./install_firecracker.sh
 
-microvm-files:
-	$(MAKE) -C microvm all
+unikernel-files:
+	$(MAKE) -C unikernel all
 
 openfaas_hypervisor: openfaas_hypervisor.go
 	CGO_ENABLED=0 go build openfaas_hypervisor.go

@@ -1,0 +1,2 @@
+all:
+	kraft build

@@ -1,7 +1,7 @@
 all: server vmlinux rootfs.ext4
 
 server:
-	CGO_ENABLED=0 go build server.go
+	gcc -static -O3 server.c -o server
 
 vmlinux:
 	docker build . -t microvm-build-kernel -f microvm-build-kernel.Dockerfile

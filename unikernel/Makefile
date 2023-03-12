@@ -1,4 +1,4 @@
-all: build/unikernel_kvm-x86_64
+all: build/httpreply_kvm-x86_64
 
-build/unikernel_kvm-x86_64: main.c
+build/httpreply_kvm-x86_64: main.c
 	kraft build

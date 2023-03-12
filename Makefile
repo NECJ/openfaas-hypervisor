@@ -1,7 +1,7 @@
 all: firecracker unikernel-files openfaas_hypervisor docker-build
 
 run:
-	docker run -it -p8080:8080 --privileged openfaas-hypervisor:microvm
+	docker run -it -p8080:8080 --privileged openfaas-hypervisor:unikernel
 
 firecracker:
 	./install_firecracker.sh
@@ -21,4 +21,4 @@ docker-push: docker-build
 
 clean:
 	rm -f openfaas_hypervisor
-	$(MAKE) -C microvm clean
+	$(MAKE) -C unikernel clean

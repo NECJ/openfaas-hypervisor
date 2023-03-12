@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync"
 	"time"
@@ -66,7 +67,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	defer func() {
+	go func() {
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt)
+		<-sigint
 		downCmd := exec.Command(`ip`, `l`, `set`, `dev`, `virbr0`, `down`)
 		err = downCmd.Run()
 		if err != nil {
@@ -78,6 +82,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		os.Exit(0)
 	}()
 
 	http.HandleFunc("/invoke", invokeFunction)

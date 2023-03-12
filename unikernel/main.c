@@ -37,20 +37,74 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
 
 #define HOST_IP "172.44.0.1"
 #define HOST_PORT 8080
 #define LISTEN_PORT 8080
-static const char reply[] = "HTTP/1.1 200 OK\r\n" \
+static const char reply_template[] = "HTTP/1.1 200 OK\r\n" \
 			    "Content-type: text/html\r\n" \
 			    "Connection: close\r\n" \
 			    "\r\n" \
-			    "3.1415\n";
+			    "%.5f\n";
 
 static const char readyMessage[] = "POST /ready HTTP/1.1\r\nHost: 8080\r\n\r\n";
 
 #define BUFLEN 2048
 static char recvbuf[BUFLEN];
+
+double compute_pi() {
+	struct timespec start={0,0};
+	struct timespec end={0,0};
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    // compute pi
+    long reps = 2000000000;
+    double result = 3;
+    int op = 1;
+    for(long i=2; i<2*reps+1; i+=2) {
+        result += 4.0/(i*(i+1)*(i+2)*op);
+        op *= -1;
+    }
+
+	printf("%f", result);
+
+	clock_gettime(CLOCK_MONOTONIC, &end);
+
+	return ((double)end.tv_sec + 1.0e-9*end.tv_nsec) - ((double)start.tv_sec + 1.0e-9*start.tv_nsec);
+}
+
+void register_ready() {
+	int valread, client_fd;
+    struct sockaddr_in serv_addr;
+    char buffer[1024] = { 0 };
+    if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        printf("\n Socket creation error \n");
+        exit(-1);
+    }
+  
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(HOST_PORT);
+  
+    // Convert IPv4 and IPv6 addresses from text to binary
+    // form
+    if (inet_pton(AF_INET, HOST_IP, &serv_addr.sin_addr)<= 0) {
+        printf("\nInvalid address/ Address not supported \n");
+        exit(-1);
+    }
+	
+    if (connect(client_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+        printf("\nConnection Failed \n");
+        exit(-1);
+    }
+    send(client_fd, readyMessage, strlen(readyMessage), 0);
+    printf("Register message sent!\n");
+
+    // closing the connected socket
+	printf("Closing socket!\n");
+    close(client_fd);
+	printf("socket closed!\n");
+}
 
 int main(int argc __attribute__((unused)),
 	 char *argv[] __attribute__((unused)))
@@ -100,6 +154,8 @@ int main(int argc __attribute__((unused)),
 		read(client, recvbuf, BUFLEN);
 
 		/* Send reply */
+		char reply[strlen(reply_template)+4];
+		sprintf(reply, reply_template, compute_pi());
 		n = write(client, reply, sizeof(reply) - 1);
 		if (n < 0)
 			fprintf(stderr, "Failed to send a reply\n");
@@ -112,36 +168,4 @@ int main(int argc __attribute__((unused)),
 
 out:
 	return 0;
-}
-
-void register_ready() {
-	int valread, client_fd;
-    struct sockaddr_in serv_addr;
-    char buffer[1024] = { 0 };
-    if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        printf("\n Socket creation error \n");
-        exit(-1);
-    }
-  
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(HOST_PORT);
-  
-    // Convert IPv4 and IPv6 addresses from text to binary
-    // form
-    if (inet_pton(AF_INET, HOST_IP, &serv_addr.sin_addr)<= 0) {
-        printf("\nInvalid address/ Address not supported \n");
-        exit(-1);
-    }
-	
-    if (connect(client_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-        printf("\nConnection Failed \n");
-        exit(-1);
-    }
-    send(client_fd, readyMessage, strlen(readyMessage), 0);
-    printf("Register message sent!\n");
-
-    // closing the connected socket
-	printf("Closing socket!\n");
-    close(client_fd);
-	printf("socket closed!\n");
 }

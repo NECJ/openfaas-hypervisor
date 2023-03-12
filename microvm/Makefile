@@ -1,13 +1,13 @@
 all: server vmlinux rootfs.ext4
 
-server:
+server: server.go
 	CGO_ENABLED=0 go build server.go
 
 vmlinux:
 	docker build . -t microvm-build-kernel -f microvm-build-kernel.Dockerfile
 	docker run -it -v $(shell pwd):/output microvm-build-kernel
 
-rootfs.ext4:
+rootfs.ext4: server
 	dd if=/dev/zero of=rootfs.ext4 bs=1M count=50
 	mkfs.ext4 rootfs.ext4
 	mkdir /tmp/my-rootfs

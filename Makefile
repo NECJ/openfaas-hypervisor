@@ -6,7 +6,7 @@ firecracker:
 microvm-files:
 	$(MAKE) -C microvm all
 
-openfaas_hypervisor:
+openfaas_hypervisor: openfaas_hypervisor.go
 	CGO_ENABLED=0 go build openfaas_hypervisor.go
 
 docker-build:

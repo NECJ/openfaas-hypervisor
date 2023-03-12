@@ -1,6 +1,6 @@
 all: firecracker microvm-files openfaas_hypervisor docker-build
 
-run: all
+run:
 	docker run -it -p8080:8080 --privileged openfaas-hypervisor:microvm
 
 firecracker:

@@ -7,7 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	IpIterator "openfaas-hypervisor/pkg"
+	AtomicIpIterator "openfaas-hypervisor/pkg"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -25,12 +25,12 @@ const (
 
 // Maps from function instance IP to function metadata
 var functionInstanceMetadata map[string]InstanceMetadata = make(map[string]InstanceMetadata)
+var functionInstanceMetadataMutex sync.Mutex
 var readyFunctionInstances = list.New()
 var readyFunctionInstancesMutex sync.Mutex
 var functionReadyChan = make(chan string)
 
-var ipIterator = IpIterator.ParseIP(bridgeIp)
-var ipIteratorLock sync.Mutex
+var ipIterator = AtomicIpIterator.ParseIP(bridgeIp)
 
 func main() {
 
@@ -65,6 +65,7 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Shutdown server properly
 	go func() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, os.Interrupt)
@@ -148,10 +149,12 @@ func setInstanceReady(functionInstance InstanceMetadata) {
 // Register that a function VM has booted and is ready to be invoked
 func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	instanceIP := strings.Split((*r).RemoteAddr, ":")[0]
+	functionInstanceMetadataMutex.Lock()
 	if metadata, ok := functionInstanceMetadata[instanceIP]; ok {
 		metadata.vmReadyTime = time.Now()
 		functionInstanceMetadata[instanceIP] = metadata
 	}
+	functionInstanceMetadataMutex.Unlock()
 	timeElapsed := functionInstanceMetadata[instanceIP].vmReadyTime.Sub(functionInstanceMetadata[instanceIP].vmStartTime)
 	fmt.Printf("Function ready to be invoked after %s\n", timeElapsed)
 	readyFunctionInstancesMutex.Lock()
@@ -162,17 +165,16 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 
 func provisionFunctionInstance() {
 	metadata := InstanceMetadata{}
-	ipIteratorLock.Lock()
-	ipIterator.Next()
-	metadata.ip = ipIterator.String()
-	ipIteratorLock.Unlock()
-	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `bridge,id=en0,br=virbr0`, `-device`, `virtio-net-pci,netdev=en0`, `-kernel`, `unikernel/build/httpreply_kvm-x86_64`, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-serial`, `none`, `-parallel`, `none`, `-monitor`, `none`, `-display`, `none`, `-vga`, `none`, `-daemonize`, `-m`, `4M`)
+	metadata.ip = ipIterator.Next()
+	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `bridge,id=en0,br=virbr0`, `-device`, `virtio-net-pci,netdev=en0`, `-kernel`, `unikernel/build/httpreply_kvm-x86_64`, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-serial`, `none`, `-parallel`, `none`, `-monitor`, `none`, `-display`, `none`, `-vga`, `none`, `-m`, `4M`)
 	metadata.vmStartTime = time.Now()
 	err := targetCmd.Start()
 	if err != nil {
 		log.Fatal(err)
 	}
+	functionInstanceMetadataMutex.Lock()
 	functionInstanceMetadata[metadata.ip] = metadata
+	functionInstanceMetadataMutex.Unlock()
 }
 
 // InstanceMetadata holds information about each function instance (VM)

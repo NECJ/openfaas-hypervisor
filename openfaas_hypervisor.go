@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	IpIterator "openfaas-hypervisor/pkg"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -18,10 +19,8 @@ import (
 )
 
 const (
-	// Using default cache directory to ensure collision avoidance on IP allocations
-	cniCacheDir = "/var/lib/cni"
-	networkName = "funcnet"
-	ifName      = "veth0"
+	bridgeIp   = "172.44.0.1"
+	bridgeMask = "24"
 )
 
 // Maps from function instance IP to function metadata
@@ -30,9 +29,8 @@ var readyFunctionInstances = list.New()
 var readyFunctionInstancesMutex sync.Mutex
 var functionReadyChan = make(chan string)
 
-var firecrackerBinPath string
-var cniConfDir string
-var cniBinPath []string
+var ipIterator = IpIterator.ParseIP(bridgeIp)
+var ipIteratorLock sync.Mutex
 
 func main() {
 
@@ -55,7 +53,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	addIpCmd := exec.Command(`ip`, `a`, `a`, `172.44.0.1/24`, `dev`, `virbr0`)
+	addIpCmd := exec.Command(`ip`, `a`, `a`, bridgeIp+`/`+bridgeMask, `dev`, `virbr0`)
 	err = addIpCmd.Run()
 	if err != nil {
 		log.Fatal(err)
@@ -163,13 +161,17 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func provisionFunctionInstance() {
-	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `bridge,id=en0,br=virbr0`, `-device`, `virtio-net-pci,netdev=en0`, `-kernel`, `unikernel/build/httpreply_kvm-x86_64`, `-append`, `netdev.ipv4_addr=172.44.0.2 netdev.ipv4_gw_addr=172.44.0.1 netdev.ipv4_subnet_mask=255.255.255.0 --`, `-cpu`, `host`, `-enable-kvm`, `-serial`, `none`, `-parallel`, `none`, `-monitor`, `none`, `-display`, `none`, `-vga`, `none`, `-daemonize`, `-m`, `4M`)
-	metadata := InstanceMetadata{vmStartTime: time.Now()}
+	metadata := InstanceMetadata{}
+	ipIteratorLock.Lock()
+	ipIterator.Next()
+	metadata.ip = ipIterator.String()
+	ipIteratorLock.Unlock()
+	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `bridge,id=en0,br=virbr0`, `-device`, `virtio-net-pci,netdev=en0`, `-kernel`, `unikernel/build/httpreply_kvm-x86_64`, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-serial`, `none`, `-parallel`, `none`, `-monitor`, `none`, `-display`, `none`, `-vga`, `none`, `-daemonize`, `-m`, `4M`)
+	metadata.vmStartTime = time.Now()
 	err := targetCmd.Start()
 	if err != nil {
 		log.Fatal(err)
 	}
-	metadata.ip = "172.44.0.2"
 	functionInstanceMetadata[metadata.ip] = metadata
 }
 

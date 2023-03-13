@@ -39,7 +39,6 @@
 #include <errno.h>
 #include <time.h>
 
-#define HOST_IP "172.44.0.1"
 #define HOST_PORT 8080
 #define LISTEN_PORT 8080
 static const char reply_template[] = "HTTP/1.1 200 OK\r\n" \
@@ -74,7 +73,7 @@ double compute_pi() {
 	return ((double)end.tv_sec + 1.0e-9*end.tv_nsec) - ((double)start.tv_sec + 1.0e-9*start.tv_nsec);
 }
 
-void register_ready() {
+void register_ready(char *ip) {
 	int valread, client_fd;
     struct sockaddr_in serv_addr;
     char buffer[1024] = { 0 };
@@ -88,7 +87,7 @@ void register_ready() {
   
     // Convert IPv4 and IPv6 addresses from text to binary
     // form
-    if (inet_pton(AF_INET, HOST_IP, &serv_addr.sin_addr)<= 0) {
+    if (inet_pton(AF_INET, ip, &serv_addr.sin_addr)<= 0) {
         printf("\nInvalid address/ Address not supported \n");
         exit(-1);
     }
@@ -106,8 +105,7 @@ void register_ready() {
 	printf("socket closed!\n");
 }
 
-int main(int argc __attribute__((unused)),
-	 char *argv[] __attribute__((unused)))
+int main(int argc, char *argv[])
 {
 	int rc = 0;
 	int srv, client;
@@ -138,7 +136,7 @@ int main(int argc __attribute__((unused)),
 	}
 
 	// register as ready with hypervisor
-	register_ready();
+	register_ready(argv[1]);
 
 	printf("Listening on port %d...\n", LISTEN_PORT);
 	while (1) {

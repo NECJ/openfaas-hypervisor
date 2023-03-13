@@ -59,7 +59,7 @@ double compute_pi() {
     clock_gettime(CLOCK_MONOTONIC, &start);
 
     // compute pi
-    long reps = 2000000000;
+    long reps = 1000000000;
     double result = 3;
     int op = 1;
     for(long i=2; i<2*reps+1; i+=2) {

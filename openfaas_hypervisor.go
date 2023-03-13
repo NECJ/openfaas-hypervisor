@@ -70,18 +70,7 @@ func main() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, os.Interrupt)
 		<-sigint
-		downCmd := exec.Command(`ip`, `l`, `set`, `dev`, `virbr0`, `down`)
-		err = downCmd.Run()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		deleteBridgeCmd := exec.Command(`brctl`, `delbr`, `virbr0`)
-		err = deleteBridgeCmd.Run()
-		if err != nil {
-			log.Fatal(err)
-		}
-		os.Exit(0)
+		shutdown()
 	}()
 
 	http.HandleFunc("/invoke", invokeFunction)
@@ -94,8 +83,23 @@ func main() {
 		fmt.Printf("server closed\n")
 	} else if err != nil {
 		fmt.Printf("error starting server: %s\n", err)
-		os.Exit(1)
+		shutdown()
 	}
+}
+
+func shutdown() {
+	downCmd := exec.Command(`ip`, `l`, `set`, `dev`, `virbr0`, `down`)
+	err := downCmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	deleteBridgeCmd := exec.Command(`brctl`, `delbr`, `virbr0`)
+	err = deleteBridgeCmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+	shutdown()
 }
 
 func invokeFunction(w http.ResponseWriter, req *http.Request) {
@@ -106,7 +110,7 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		fmt.Printf("Error invoking function: %s\n", err)
 		http.Error(w, "Error invoking function", http.StatusInternalServerError)
-		os.Exit(1)
+		shutdown()
 	}
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {

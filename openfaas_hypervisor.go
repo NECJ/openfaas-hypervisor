@@ -21,6 +21,7 @@ import (
 const (
 	bridgeIp   = "172.44.0.1"
 	bridgeMask = "24"
+	bridgeName = "virbr0"
 )
 
 // Maps from function instance IP to function metadata
@@ -47,19 +48,19 @@ func main() {
 	}
 
 	// setup network bridge
-	createBridgeCmd := exec.Command(`brctl`, `addbr`, `virbr0`)
+	createBridgeCmd := exec.Command(`brctl`, `addbr`, bridgeName)
 	err = createBridgeCmd.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	addIpCmd := exec.Command(`ip`, `a`, `a`, bridgeIp+`/`+bridgeMask, `dev`, `virbr0`)
+	addIpCmd := exec.Command(`ip`, `a`, `a`, bridgeIp+`/`+bridgeMask, `dev`, bridgeName)
 	err = addIpCmd.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	upCmd := exec.Command(`ip`, `l`, `set`, `dev`, `virbr0`, `up`)
+	upCmd := exec.Command(`ip`, `l`, `set`, `dev`, bridgeName, `up`)
 	err = upCmd.Run()
 	if err != nil {
 		log.Fatal(err)
@@ -88,13 +89,13 @@ func main() {
 }
 
 func shutdown() {
-	downCmd := exec.Command(`ip`, `l`, `set`, `dev`, `virbr0`, `down`)
+	downCmd := exec.Command(`ip`, `l`, `set`, `dev`, bridgeName, `down`)
 	err := downCmd.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	deleteBridgeCmd := exec.Command(`brctl`, `delbr`, `virbr0`)
+	deleteBridgeCmd := exec.Command(`brctl`, `delbr`, bridgeName)
 	err = deleteBridgeCmd.Run()
 	if err != nil {
 		log.Fatal(err)
@@ -170,7 +171,7 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 func provisionFunctionInstance() {
 	metadata := InstanceMetadata{}
 	metadata.ip = ipIterator.Next()
-	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `bridge,id=en0,br=virbr0`, `-device`, `virtio-net-pci,netdev=en0`, `-kernel`, `unikernel/build/httpreply_kvm-x86_64`, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-serial`, `none`, `-parallel`, `none`, `-monitor`, `none`, `-display`, `none`, `-vga`, `none`, `-m`, `4M`)
+	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `bridge,id=en0,br=`+bridgeName, `-device`, `virtio-net-pci,netdev=en0`, `-kernel`, `unikernel/build/httpreply_kvm-x86_64`, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-serial`, `none`, `-parallel`, `none`, `-monitor`, `none`, `-display`, `none`, `-vga`, `none`, `-m`, `4M`)
 	metadata.vmStartTime = time.Now()
 	err := targetCmd.Start()
 	if err != nil {

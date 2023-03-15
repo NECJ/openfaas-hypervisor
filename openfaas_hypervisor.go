@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	AtomicIpIterator "openfaas-hypervisor/pkg"
+	AtomicIterator "openfaas-hypervisor/pkg"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,9 +22,10 @@ import (
 )
 
 const (
-	bridgeIp   = "172.44.0.1"
-	bridgeMask = "24"
-	bridgeName = "virbr0"
+	bridgeIp    = "172.44.0.1"
+	bridgeMask  = "24"
+	bridgeName  = "ofhbr"
+	tapBaseName = "ofhtap"
 )
 
 // Maps from function instance IP to function metadata
@@ -32,6 +36,7 @@ var readyFunctionInstancesMutex sync.Mutex
 var functionReadyChan = make(chan string)
 
 var ipIterator = AtomicIpIterator.ParseIP(bridgeIp)
+var tapIterator = AtomicIterator.New()
 
 func main() {
 
@@ -48,7 +53,7 @@ func main() {
 	}
 
 	// setup network bridge
-	createBridgeCmd := exec.Command(`brctl`, `addbr`, bridgeName)
+	createBridgeCmd := exec.Command(`ip`, `link`, `add`, bridgeName, `type`, `bridge`)
 	err = createBridgeCmd.Run()
 	if err != nil {
 		log.Fatal(err)
@@ -60,7 +65,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	upCmd := exec.Command(`ip`, `l`, `set`, `dev`, bridgeName, `up`)
+	upCmd := exec.Command(`ip`, `link`, `set`, `dev`, bridgeName, `up`)
 	err = upCmd.Run()
 	if err != nil {
 		log.Fatal(err)
@@ -89,6 +94,28 @@ func main() {
 }
 
 func shutdown() {
+
+	// shutdown instances
+	for k := range functionInstanceMetadata {
+		functionInstanceMetadata[k].process.Kill()
+		functionInstanceMetadata[k].process.Wait()
+	}
+
+	// remove tap devices
+	val := tapIterator.Next()
+	for i := 0; i < val; i++ {
+		downTapCmd := exec.Command(`ip`, `link`, `set`, `dev`, tapBaseName+strconv.FormatInt(int64(i), 10), `down`)
+		err := downTapCmd.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+		deleteTapCmd := exec.Command(`ip`, `tuntap`, `del`, `dev`, tapBaseName+strconv.FormatInt(int64(i), 10), `mode`, `tap`)
+		err = deleteTapCmd.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	downCmd := exec.Command(`ip`, `l`, `set`, `dev`, bridgeName, `down`)
 	err := downCmd.Run()
 	if err != nil {
@@ -100,7 +127,8 @@ func shutdown() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	shutdown()
+
+	os.Exit(0)
 }
 
 func invokeFunction(w http.ResponseWriter, req *http.Request) {
@@ -168,15 +196,52 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	functionReadyChan <- instanceIP
 }
 
+func RandomMacAddress() string {
+	macAddress := "00:"
+	for i := 0; i < 5; i++ {
+		macAddress += fmt.Sprintf("%02x", rand.Intn(256)) + ":"
+	}
+	return strings.TrimRight(macAddress, ":")
+}
+
 func provisionFunctionInstance() {
+
+	tapName := tapBaseName + strconv.FormatInt(int64(tapIterator.Next()), 10)
+
+	// create tap device
+	createTapCmd := exec.Command(`ip`, `tuntap`, `add`, `dev`, tapName, `mode`, `tap`)
+	err := createTapCmd.Run()
+	if err != nil {
+		fmt.Printf("Error creating tap device: %s\n", err)
+		shutdown()
+	}
+
+	// attach tap to bridge
+	attachTapCmd := exec.Command(`ip`, `link`, `set`, `dev`, tapName, `master`, bridgeName)
+	err = attachTapCmd.Run()
+	if err != nil {
+		fmt.Printf("Error attaching tap device to bridge: %s\n", err)
+		shutdown()
+	}
+
+	// bring tap up
+	bringTapUpCmd := exec.Command(`ip`, `link`, `set`, `dev`, tapName, `up`)
+	err = bringTapUpCmd.Run()
+	if err != nil {
+		fmt.Printf("Error bringing tap up: %s\n", err)
+		shutdown()
+	}
+
 	metadata := InstanceMetadata{}
 	metadata.ip = ipIterator.Next()
-	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `bridge,id=en0,br=`+bridgeName, `-device`, `virtio-net-pci,netdev=en0`, `-kernel`, `unikernel/build/httpreply_kvm-x86_64`, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-serial`, `none`, `-parallel`, `none`, `-monitor`, `none`, `-display`, `none`, `-vga`, `none`, `-m`, `4M`)
+	macAddr := RandomMacAddress()
+	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, `unikernel/build/httpreply_kvm-x86_64`, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-nographic`, `-m`, `4M`)
 	metadata.vmStartTime = time.Now()
-	err := targetCmd.Start()
+	err = targetCmd.Start()
 	if err != nil {
 		log.Fatal(err)
 	}
+	metadata.process = targetCmd.Process
 	functionInstanceMetadataMutex.Lock()
 	functionInstanceMetadata[metadata.ip] = metadata
 	functionInstanceMetadataMutex.Unlock()
@@ -187,4 +252,5 @@ type InstanceMetadata struct {
 	ip          string
 	vmStartTime time.Time
 	vmReadyTime time.Time
+	process     *os.Process
 }

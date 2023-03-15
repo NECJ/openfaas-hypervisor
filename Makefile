@@ -9,7 +9,7 @@ firecracker:
 unikernel-files:
 	$(MAKE) -C unikernel all
 
-openfaas_hypervisor: openfaas_hypervisor.go pkg/AtomicIpIterator.go
+openfaas_hypervisor: openfaas_hypervisor.go pkg/AtomicIpIterator.go pkg/AtomicIterator.go
 	CGO_ENABLED=0 go build openfaas_hypervisor.go
 
 docker-build:

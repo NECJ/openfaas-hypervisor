@@ -194,7 +194,7 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 		Drives:          firecracker.NewDrivesBuilder(rootfsPath).Build(),
 		MachineCfg: models.MachineConfiguration{
 			VcpuCount:  firecracker.Int64(1),
-			MemSizeMib: firecracker.Int64(58),
+			MemSizeMib: firecracker.Int64(50),
 		},
 		NetworkInterfaces: networkInterfaces,
 	}

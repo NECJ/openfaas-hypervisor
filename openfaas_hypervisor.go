@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	kernelImagePath = "microvms/vmlinux"
-	rootfsPath      = "microvms/calc-pi/rootfs.ext4"
+	kernelImagePath    = "microvms/vmlinux"
+	rootfsPathTemplate = "microvms/%s/rootfs.ext4"
 	// Using default cache directory to ensure collision avoidance on IP allocations
 	cniCacheDir = "/var/lib/cni"
 	networkName = "funcnet"
@@ -29,7 +29,9 @@ const (
 
 // Maps from function instance IP to function metadata
 var functionInstanceMetadata sync.Map
-var readyFunctionInstances sync.Pool
+
+// Maps from function name to a pool of ready instances
+var readyFunctionInstances map[string]*sync.Pool = make(map[string]*sync.Pool)
 var functionReadyChannels sync.Map
 
 var firecrackerBinPath string
@@ -61,7 +63,16 @@ func main() {
 	cniConfDir = filepath.Join(dir, "cni/config")
 	cniBinPath = []string{filepath.Join(dir, "cni/bin")} // CNI binaries
 
-	http.HandleFunc("/invoke", invokeFunction)
+	// initialise readyFunctionInstances
+	vms, err := os.ReadDir("./microvms")
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, vm := range vms {
+		readyFunctionInstances[vm.Name()] = &sync.Pool{}
+	}
+
+	http.HandleFunc("/function/", invokeFunction)
 	http.HandleFunc("/ready", registerInstanceReady)
 
 	fmt.Printf("Server up!!\n")
@@ -77,7 +88,10 @@ func main() {
 
 func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
-	functionInstance := getReadyInstance()
+
+	functionName := strings.TrimPrefix(req.URL.Path, "/function/")
+
+	functionInstance := getReadyInstance(functionName)
 
 	res, err := http.Get("http://" + functionInstance.ip + ":8080/invoke")
 	if err != nil {
@@ -99,12 +113,16 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 }
 
 // Get a ready function instance and removes it from the ready list
-func getReadyInstance() InstanceMetadata {
+func getReadyInstance(functionName string) InstanceMetadata {
 	var readyInstance any = nil
 	for readyInstance == nil {
-		readyInstance = readyFunctionInstances.Get()
+		instancePool := readyFunctionInstances[functionName]
+		if instancePool == nil {
+			log.Fatal("Compiled function '" + functionName + "' does not exist.")
+		}
+		readyInstance = instancePool.Get()
 		if readyInstance == nil {
-			instanceIp := provisionFunctionInstance()
+			instanceIp := provisionFunctionInstance(functionName)
 			// wait for it to be ready
 			channel := make(chan string)
 			functionReadyChannels.Store(instanceIp, channel)
@@ -115,7 +133,7 @@ func getReadyInstance() InstanceMetadata {
 }
 
 func setInstanceReady(functionInstance InstanceMetadata) {
-	readyFunctionInstances.Put(functionInstance)
+	readyFunctionInstances[functionInstance.name].Put(functionInstance)
 }
 
 // Register that a function VM has booted and is ready to be invoked
@@ -135,7 +153,7 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	close(channel.(chan string))
 }
 
-func provisionFunctionInstance() string {
+func provisionFunctionInstance(functionName string) string {
 	ctx := context.Background()
 
 	// Setup socket path
@@ -157,6 +175,7 @@ func provisionFunctionInstance() string {
 		},
 	}}
 
+	rootfsPath := fmt.Sprintf(rootfsPathTemplate, functionName)
 	cfg := firecracker.Config{
 		SocketPath:      socketPath,
 		KernelImagePath: kernelImagePath,
@@ -173,7 +192,7 @@ func provisionFunctionInstance() string {
 		panic(fmt.Errorf("failed to create new machine: %v", err))
 	}
 
-	metadata := InstanceMetadata{vmStartTime: time.Now()}
+	metadata := InstanceMetadata{vmStartTime: time.Now(), name: functionName}
 	if err := m.Start(ctx); err != nil {
 		panic(fmt.Errorf("failed to initialize machine: %v", err))
 	}
@@ -186,6 +205,7 @@ func provisionFunctionInstance() string {
 // InstanceMetadata holds information about each function instance (VM)
 type InstanceMetadata struct {
 	ip          string
+	name        string
 	vmStartTime time.Time
 	vmReadyTime time.Time
 }

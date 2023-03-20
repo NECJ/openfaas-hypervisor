@@ -32,7 +32,7 @@ const (
 var functionInstanceMetadata map[string]InstanceMetadata = make(map[string]InstanceMetadata)
 var readyFunctionInstances = list.New()
 var readyFunctionInstancesMutex sync.Mutex
-var functionReadyChan = make(chan string)
+var functionReadyChannels map[string]chan string = make(map[string]chan string)
 
 var firecrackerBinPath string
 var cniConfDir string
@@ -108,9 +108,11 @@ func getReadyInstance() InstanceMetadata {
 		readyInstance = readyFunctionInstances.Front()
 		if readyInstance == nil {
 			readyFunctionInstancesMutex.Unlock()
-			provisionFunctionInstance()
+			instanceIp := provisionFunctionInstance()
 			// wait for it to be ready
-			<-functionReadyChan
+			channel := make(chan string)
+			functionReadyChannels[instanceIp] = channel
+			<-channel
 		} else {
 			readyFunctionInstances.Remove(readyInstance)
 			readyFunctionInstancesMutex.Unlock()
@@ -137,10 +139,13 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	readyFunctionInstancesMutex.Lock()
 	readyFunctionInstances.PushBack(functionInstanceMetadata[instanceIP])
 	readyFunctionInstancesMutex.Unlock()
-	functionReadyChan <- instanceIP
+	channel := functionReadyChannels[instanceIP]
+	functionReadyChannels[instanceIP] <- instanceIP
+	close(channel)
+	delete(functionReadyChannels, instanceIP)
 }
 
-func provisionFunctionInstance() {
+func provisionFunctionInstance() string {
 	ctx := context.Background()
 
 	// Setup socket path
@@ -185,6 +190,7 @@ func provisionFunctionInstance() {
 
 	metadata.ip = m.Cfg.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.IP.String()
 	functionInstanceMetadata[metadata.ip] = metadata
+	return metadata.ip
 }
 
 // InstanceMetadata holds information about each function instance (VM)

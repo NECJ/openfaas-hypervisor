@@ -69,7 +69,22 @@ func main() {
 		log.Fatal(err)
 	}
 	for _, vm := range vms {
-		readyFunctionInstances[vm.Name()] = &sync.Pool{}
+		functionName := vm.Name()
+		readyFunctionInstances[functionName] = &sync.Pool{
+			New: func() any {
+				// Create channel to indicate that vm has initialised
+				readyChannel := make(chan string)
+
+				metadata := provisionFunctionInstance(functionName)
+
+				// Store channel so that it can be accessed by /ready
+				functionReadyChannels.Store(metadata.ip, readyChannel)
+				// wait for instance to be ready
+				<-readyChannel
+
+				return metadata
+			},
+		}
 	}
 
 	http.HandleFunc("/function/", invokeFunction)
@@ -121,13 +136,6 @@ func getReadyInstance(functionName string) InstanceMetadata {
 			log.Fatal("Compiled function '" + functionName + "' does not exist.")
 		}
 		readyInstance = instancePool.Get()
-		if readyInstance == nil {
-			instanceIp := provisionFunctionInstance(functionName)
-			// wait for it to be ready
-			channel := make(chan string)
-			functionReadyChannels.Store(instanceIp, channel)
-			<-channel
-		}
 	}
 	return readyInstance.(InstanceMetadata)
 }
@@ -153,7 +161,7 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	close(channel.(chan string))
 }
 
-func provisionFunctionInstance(functionName string) string {
+func provisionFunctionInstance(functionName string) InstanceMetadata {
 	ctx := context.Background()
 
 	// Setup socket path
@@ -199,7 +207,7 @@ func provisionFunctionInstance(functionName string) string {
 
 	metadata.ip = m.Cfg.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.IP.String()
 	functionInstanceMetadata.Store(metadata.ip, metadata)
-	return metadata.ip
+	return metadata
 }
 
 // InstanceMetadata holds information about each function instance (VM)

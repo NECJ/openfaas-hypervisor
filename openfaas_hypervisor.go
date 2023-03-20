@@ -1,7 +1,6 @@
 package main
 
 import (
-	"container/list"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -22,25 +21,24 @@ import (
 )
 
 const (
-	bridgeIp    = "172.44.0.1"
-	bridgeMask  = "24"
-	bridgeName  = "ofhbr"
-	tapBaseName = "ofhtap"
-	kernelPath  = "unikernels/calc-pi/build/httpreply_kvm-x86_64"
+	bridgeIp           = "172.44.0.1"
+	bridgeMask         = "24"
+	bridgeName         = "ofhbr"
+	tapBaseName        = "ofhtap"
+	kernelPathTemplate = "unikernels/%s/build/httpreply_kvm-x86_64"
 )
 
 // Maps from function instance IP to function metadata
-var functionInstanceMetadata map[string]InstanceMetadata = make(map[string]InstanceMetadata)
-var functionInstanceMetadataMutex sync.Mutex
-var readyFunctionInstances = list.New()
-var readyFunctionInstancesMutex sync.Mutex
-var functionReadyChan = make(chan string)
+var functionInstanceMetadata sync.Map
+
+// Maps from function name to a pool of ready instances
+var readyFunctionInstances map[string]*sync.Pool = make(map[string]*sync.Pool)
+var functionReadyChannels sync.Map
 
 var ipIterator = AtomicIpIterator.ParseIP(bridgeIp)
 var tapIterator = AtomicIterator.New()
 
 func main() {
-
 	// Check for kvm access
 	err := unix.Access("/dev/kvm", unix.W_OK)
 	if err != nil {
@@ -80,7 +78,31 @@ func main() {
 		shutdown()
 	}()
 
-	http.HandleFunc("/invoke", invokeFunction)
+	// initialise readyFunctionInstances
+	vms, err := os.ReadDir("./unikernels")
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, vm := range vms {
+		functionName := vm.Name()
+		readyFunctionInstances[functionName] = &sync.Pool{
+			New: func() any {
+				// Create channel to indicate that vm has initialised
+				readyChannel := make(chan string)
+
+				metadata := provisionFunctionInstance(functionName)
+
+				// Store channel so that it can be accessed by /ready
+				functionReadyChannels.Store(metadata.ip, readyChannel)
+				// wait for instance to be ready
+				<-readyChannel
+
+				return metadata
+			},
+		}
+	}
+
+	http.HandleFunc("/function/", invokeFunction)
 	http.HandleFunc("/ready", registerInstanceReady)
 
 	fmt.Printf("Server up!!\n")
@@ -97,10 +119,11 @@ func main() {
 func shutdown() {
 
 	// shutdown instances
-	for k := range functionInstanceMetadata {
-		functionInstanceMetadata[k].process.Kill()
-		functionInstanceMetadata[k].process.Wait()
-	}
+	functionInstanceMetadata.Range(func(key, value any) bool {
+		value.(InstanceMetadata).process.Kill()
+		value.(InstanceMetadata).process.Wait()
+		return true
+	})
 
 	// remove tap devices
 	val := tapIterator.Next()
@@ -134,7 +157,10 @@ func shutdown() {
 
 func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
-	functionInstance := getReadyInstance()
+
+	functionName := strings.TrimPrefix(req.URL.Path, "/function/")
+
+	functionInstance := getReadyInstance(functionName)
 
 	res, err := http.Get("http://" + functionInstance.ip + ":8080/invoke")
 	if err != nil {
@@ -156,45 +182,38 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 }
 
 // Get a ready function instance and removes it from the ready list
-func getReadyInstance() InstanceMetadata {
-	var readyInstance *list.Element = nil
+func getReadyInstance(functionName string) InstanceMetadata {
+	var readyInstance any = nil
 	for readyInstance == nil {
-		readyFunctionInstancesMutex.Lock()
-		readyInstance = readyFunctionInstances.Front()
-		if readyInstance == nil {
-			readyFunctionInstancesMutex.Unlock()
-			provisionFunctionInstance()
-			// wait for it to be ready
-			<-functionReadyChan
-		} else {
-			readyFunctionInstances.Remove(readyInstance)
-			readyFunctionInstancesMutex.Unlock()
+		instancePool := readyFunctionInstances[functionName]
+		if instancePool == nil {
+			log.Printf("Compiled function '" + functionName + "' does not exist.")
+			shutdown()
 		}
+		readyInstance = instancePool.Get()
 	}
-	return readyInstance.Value.(InstanceMetadata)
+	return readyInstance.(InstanceMetadata)
 }
 
 func setInstanceReady(functionInstance InstanceMetadata) {
-	readyFunctionInstancesMutex.Lock()
-	readyFunctionInstances.PushBack(functionInstance)
-	readyFunctionInstancesMutex.Unlock()
+	readyFunctionInstances[functionInstance.name].Put(functionInstance)
 }
 
 // Register that a function VM has booted and is ready to be invoked
 func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	instanceIP := strings.Split((*r).RemoteAddr, ":")[0]
-	functionInstanceMetadataMutex.Lock()
-	if metadata, ok := functionInstanceMetadata[instanceIP]; ok {
+	metadataAny, ok := functionInstanceMetadata.Load(instanceIP)
+	metadata := metadataAny.(InstanceMetadata)
+	if ok {
 		metadata.vmReadyTime = time.Now()
-		functionInstanceMetadata[instanceIP] = metadata
+		functionInstanceMetadata.Store(instanceIP, metadata)
 	}
-	functionInstanceMetadataMutex.Unlock()
-	timeElapsed := functionInstanceMetadata[instanceIP].vmReadyTime.Sub(functionInstanceMetadata[instanceIP].vmStartTime)
+	timeElapsed := metadata.vmReadyTime.Sub(metadata.vmStartTime)
 	fmt.Printf("Function ready to be invoked after %s\n", timeElapsed)
-	readyFunctionInstancesMutex.Lock()
-	readyFunctionInstances.PushBack(functionInstanceMetadata[instanceIP])
-	readyFunctionInstancesMutex.Unlock()
-	functionReadyChan <- instanceIP
+	setInstanceReady(metadata)
+	channel, _ := functionReadyChannels.LoadAndDelete(instanceIP)
+	channel.(chan string) <- instanceIP
+	close(channel.(chan string))
 }
 
 func RandomMacAddress() string {
@@ -205,7 +224,7 @@ func RandomMacAddress() string {
 	return strings.TrimRight(macAddress, ":")
 }
 
-func provisionFunctionInstance() {
+func provisionFunctionInstance(functionName string) InstanceMetadata {
 
 	tapName := tapBaseName + strconv.FormatInt(int64(tapIterator.Next()), 10)
 
@@ -233,9 +252,10 @@ func provisionFunctionInstance() {
 		shutdown()
 	}
 
-	metadata := InstanceMetadata{}
+	metadata := InstanceMetadata{name: functionName}
 	metadata.ip = ipIterator.Next()
 	macAddr := RandomMacAddress()
+	kernelPath := fmt.Sprintf(kernelPathTemplate, functionName)
 	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-nographic`, `-m`, `4M`)
 	metadata.vmStartTime = time.Now()
 	err = targetCmd.Start()
@@ -243,14 +263,14 @@ func provisionFunctionInstance() {
 		log.Fatal(err)
 	}
 	metadata.process = targetCmd.Process
-	functionInstanceMetadataMutex.Lock()
-	functionInstanceMetadata[metadata.ip] = metadata
-	functionInstanceMetadataMutex.Unlock()
+	functionInstanceMetadata.Store(metadata.ip, metadata)
+	return metadata
 }
 
 // InstanceMetadata holds information about each function instance (VM)
 type InstanceMetadata struct {
 	ip          string
+	name        string
 	vmStartTime time.Time
 	vmReadyTime time.Time
 	process     *os.Process

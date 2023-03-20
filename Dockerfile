@@ -3,7 +3,6 @@ FROM alpine
 COPY firecracker /
 COPY openfaas_hypervisor /
 COPY cni /cni
-COPY microvm/rootfs.ext4 /microvm/rootfs.ext4
-COPY microvm/vmlinux /microvm/vmlinux
+COPY microvms /microvms
 
 CMD ["/openfaas_hypervisor"]

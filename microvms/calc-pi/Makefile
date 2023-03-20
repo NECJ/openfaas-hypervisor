@@ -1,11 +1,7 @@
-all: server vmlinux rootfs.ext4
+all: server rootfs.ext4
 
 server: server.c
 	gcc -static -O3 server.c -o server
-
-vmlinux:
-	docker build . -t microvm-build-kernel -f microvm-build-kernel.Dockerfile
-	docker run -it -v $(shell pwd):/output microvm-build-kernel
 
 rootfs.ext4: server
 	dd if=/dev/zero of=rootfs.ext4 bs=1M count=50
@@ -22,4 +18,4 @@ rootfs.ext4: server
 	rm -r /tmp/my-rootfs
 
 clean:
-	rm -f vmlinux rootfs.ext4 server
+	rm -f rootfs.ext4 server

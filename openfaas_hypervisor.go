@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	kernelImagePath = "microvm/vmlinux"
-	rootfsPath      = "microvm/rootfs.ext4"
+	kernelImagePath = "microvms/vmlinux"
+	rootfsPath      = "microvms/calc-pi/rootfs.ext4"
 	// Using default cache directory to ensure collision avoidance on IP allocations
 	cniCacheDir = "/var/lib/cni"
 	networkName = "funcnet"

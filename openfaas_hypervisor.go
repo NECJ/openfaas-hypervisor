@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -17,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	FaasProvidertypes "github.com/openfaas/faas-provider/types"
 	"golang.org/x/sys/unix"
 )
 
@@ -84,26 +86,30 @@ func main() {
 		log.Fatal(err)
 	}
 	for _, vm := range vms {
-		functionName := vm.Name()
-		readyFunctionInstances[functionName] = &sync.Pool{
-			New: func() any {
-				// Create channel to indicate that vm has initialised
-				readyChannel := make(chan string)
+		if vm.IsDir() {
+			functionName := vm.Name()
+			readyFunctionInstances[functionName] = &sync.Pool{
+				New: func() any {
+					// Create channel to indicate that vm has initialised
+					readyChannel := make(chan string)
 
-				metadata := provisionFunctionInstance(functionName)
+					metadata := provisionFunctionInstance(functionName)
 
-				// Store channel so that it can be accessed by /ready
-				functionReadyChannels.Store(metadata.ip, readyChannel)
-				// wait for instance to be ready
-				<-readyChannel
+					// Store channel so that it can be accessed by /ready
+					functionReadyChannels.Store(metadata.ip, readyChannel)
+					// wait for instance to be ready
+					<-readyChannel
 
-				return metadata
-			},
+					return metadata
+				},
+			}
 		}
 	}
 
 	http.HandleFunc("/function/", invokeFunction)
 	http.HandleFunc("/ready", registerInstanceReady)
+	http.HandleFunc("/system/functions", getDeployedFunctions)
+	http.HandleFunc("/system/functions/", getFunctionSummary)
 
 	fmt.Printf("Server up!!\n")
 	err = http.ListenAndServe(":8080", nil)
@@ -274,4 +280,63 @@ type InstanceMetadata struct {
 	vmStartTime time.Time
 	vmReadyTime time.Time
 	process     *os.Process
+}
+
+func getDeployedFunctions(w http.ResponseWriter, r *http.Request) {
+	functions := []FaasProvidertypes.FunctionStatus{}
+	for functionName := range readyFunctionInstances {
+		// TODO: get true values
+		functions = append(functions, FaasProvidertypes.FunctionStatus{
+			Name:              functionName,
+			Replicas:          1,
+			Image:             "None",
+			AvailableReplicas: 1,
+			InvocationCount:   0,
+			Labels:            &(map[string]string{}),
+			Annotations:       &(map[string]string{}),
+			Namespace:         "openfaas",
+			Secrets:           []string{},
+			CreatedAt:         time.Now(),
+		})
+	}
+
+	functionBytes, err := json.Marshal(functions)
+	if err != nil {
+		log.Printf("Failed to marshal functions: %s", err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to marshal functions"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(functionBytes)
+}
+
+func getFunctionSummary(w http.ResponseWriter, r *http.Request) {
+	functionName := strings.TrimPrefix(r.URL.Path, "/system/functions/")
+	function := FaasProvidertypes.FunctionStatus{
+		Name:              functionName,
+		Replicas:          1,
+		Image:             "None",
+		AvailableReplicas: 1,
+		InvocationCount:   0,
+		Labels:            &(map[string]string{}),
+		Annotations:       &(map[string]string{}),
+		Namespace:         "openfaas",
+		Secrets:           []string{},
+		CreatedAt:         time.Now(),
+	}
+
+	functionBytes, err := json.Marshal(function)
+	if err != nil {
+		log.Printf("Failed to marshal functions: %s", err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to marshal functions"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(functionBytes)
 }

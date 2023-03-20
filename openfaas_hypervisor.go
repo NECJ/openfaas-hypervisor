@@ -1,7 +1,6 @@
 package main
 
 import (
-	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -29,9 +28,8 @@ const (
 )
 
 // Maps from function instance IP to function metadata
-var functionInstanceMetadata map[string]InstanceMetadata = make(map[string]InstanceMetadata)
-var readyFunctionInstances = list.New()
-var readyFunctionInstancesMutex sync.Mutex
+var functionInstanceMetadata sync.Map
+var readyFunctionInstances sync.Pool
 var functionReadyChannels sync.Map
 
 var firecrackerBinPath string
@@ -102,43 +100,36 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 
 // Get a ready function instance and removes it from the ready list
 func getReadyInstance() InstanceMetadata {
-	var readyInstance *list.Element = nil
+	var readyInstance any = nil
 	for readyInstance == nil {
-		readyFunctionInstancesMutex.Lock()
-		readyInstance = readyFunctionInstances.Front()
+		readyInstance = readyFunctionInstances.Get()
 		if readyInstance == nil {
-			readyFunctionInstancesMutex.Unlock()
 			instanceIp := provisionFunctionInstance()
 			// wait for it to be ready
 			channel := make(chan string)
 			functionReadyChannels.Store(instanceIp, channel)
 			<-channel
-		} else {
-			readyFunctionInstances.Remove(readyInstance)
-			readyFunctionInstancesMutex.Unlock()
 		}
 	}
-	return readyInstance.Value.(InstanceMetadata)
+	return readyInstance.(InstanceMetadata)
 }
 
 func setInstanceReady(functionInstance InstanceMetadata) {
-	readyFunctionInstancesMutex.Lock()
-	readyFunctionInstances.PushBack(functionInstance)
-	readyFunctionInstancesMutex.Unlock()
+	readyFunctionInstances.Put(functionInstance)
 }
 
 // Register that a function VM has booted and is ready to be invoked
 func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	instanceIP := strings.Split((*r).RemoteAddr, ":")[0]
-	if metadata, ok := functionInstanceMetadata[instanceIP]; ok {
+	metadataAny, ok := functionInstanceMetadata.Load(instanceIP)
+	metadata := metadataAny.(InstanceMetadata)
+	if ok {
 		metadata.vmReadyTime = time.Now()
-		functionInstanceMetadata[instanceIP] = metadata
+		functionInstanceMetadata.Store(instanceIP, metadata)
 	}
-	timeElapsed := functionInstanceMetadata[instanceIP].vmReadyTime.Sub(functionInstanceMetadata[instanceIP].vmStartTime)
+	timeElapsed := metadata.vmReadyTime.Sub(metadata.vmStartTime)
 	fmt.Printf("Function ready to be invoked after %s\n", timeElapsed)
-	readyFunctionInstancesMutex.Lock()
-	readyFunctionInstances.PushBack(functionInstanceMetadata[instanceIP])
-	readyFunctionInstancesMutex.Unlock()
+	setInstanceReady(metadata)
 	channel, _ := functionReadyChannels.LoadAndDelete(instanceIP)
 	channel.(chan string) <- instanceIP
 	close(channel.(chan string))
@@ -188,7 +179,7 @@ func provisionFunctionInstance() string {
 	}
 
 	metadata.ip = m.Cfg.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.IP.String()
-	functionInstanceMetadata[metadata.ip] = metadata
+	functionInstanceMetadata.Store(metadata.ip, metadata)
 	return metadata.ip
 }
 

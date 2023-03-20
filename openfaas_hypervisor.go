@@ -26,6 +26,7 @@ const (
 	bridgeMask  = "24"
 	bridgeName  = "ofhbr"
 	tapBaseName = "ofhtap"
+	kernelPath  = "unikernels/calc-pi/build/httpreply_kvm-x86_64"
 )
 
 // Maps from function instance IP to function metadata
@@ -235,7 +236,7 @@ func provisionFunctionInstance() {
 	metadata := InstanceMetadata{}
 	metadata.ip = ipIterator.Next()
 	macAddr := RandomMacAddress()
-	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, `unikernel/build/httpreply_kvm-x86_64`, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-nographic`, `-m`, `4M`)
+	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-nographic`, `-m`, `4M`)
 	metadata.vmStartTime = time.Now()
 	err = targetCmd.Start()
 	if err != nil {

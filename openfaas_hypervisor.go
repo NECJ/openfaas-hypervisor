@@ -32,7 +32,7 @@ const (
 var functionInstanceMetadata map[string]InstanceMetadata = make(map[string]InstanceMetadata)
 var readyFunctionInstances = list.New()
 var readyFunctionInstancesMutex sync.Mutex
-var functionReadyChannels map[string]chan string = make(map[string]chan string)
+var functionReadyChannels sync.Map
 
 var firecrackerBinPath string
 var cniConfDir string
@@ -111,7 +111,7 @@ func getReadyInstance() InstanceMetadata {
 			instanceIp := provisionFunctionInstance()
 			// wait for it to be ready
 			channel := make(chan string)
-			functionReadyChannels[instanceIp] = channel
+			functionReadyChannels.Store(instanceIp, channel)
 			<-channel
 		} else {
 			readyFunctionInstances.Remove(readyInstance)
@@ -139,10 +139,9 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	readyFunctionInstancesMutex.Lock()
 	readyFunctionInstances.PushBack(functionInstanceMetadata[instanceIP])
 	readyFunctionInstancesMutex.Unlock()
-	channel := functionReadyChannels[instanceIP]
-	functionReadyChannels[instanceIP] <- instanceIP
-	close(channel)
-	delete(functionReadyChannels, instanceIP)
+	channel, _ := functionReadyChannels.LoadAndDelete(instanceIP)
+	channel.(chan string) <- instanceIP
+	close(channel.(chan string))
 }
 
 func provisionFunctionInstance() string {

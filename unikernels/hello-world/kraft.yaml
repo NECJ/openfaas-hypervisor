@@ -1,0 +1,17 @@
+---
+specification: '0.5'
+name: httpreply
+unikraft:
+  version: stable
+  kconfig:
+    - CONFIG_LIBNOLIBC=y
+    - CONFIG_LIBUKSCHED=y
+    - CONFIG_LIBUKSCHEDCOOP=y
+targets:
+  - architecture: x86_64
+    platform: kvm
+libraries:
+  musl:
+    version: stable
+  lwip:
+    version: stable

@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"openfaas-hypervisor/pkg"
 	AtomicIpIterator "openfaas-hypervisor/pkg"
 	AtomicIterator "openfaas-hypervisor/pkg"
 	Stats "openfaas-hypervisor/pkg"
@@ -36,7 +37,7 @@ const (
 var functionInstanceMetadata sync.Map
 
 // Maps from function name to a pool of ready instances
-var readyFunctionInstances map[string]*sync.Pool = make(map[string]*sync.Pool)
+var readyFunctionInstances map[string]*pkg.VmPool = make(map[string]*pkg.VmPool)
 var functionReadyChannels sync.Map
 
 var ipIterator = AtomicIpIterator.ParseIP(bridgeIp)
@@ -92,8 +93,8 @@ func main() {
 	for _, vm := range vms {
 		if vm.IsDir() {
 			functionName := vm.Name()
-			readyFunctionInstances[functionName] = &sync.Pool{
-				New: func() any {
+			readyFunctionInstances[functionName] = pkg.NewPool(
+				func() any {
 					// Create channel to indicate that vm has initialised
 					readyChannel := make(chan string)
 
@@ -106,7 +107,7 @@ func main() {
 
 					return metadata
 				},
-			}
+			)
 		}
 	}
 

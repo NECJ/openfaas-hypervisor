@@ -1,4 +1,4 @@
-package AtomicIpIterator
+package pkg
 
 import (
 	"net"

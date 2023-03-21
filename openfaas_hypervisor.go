@@ -10,6 +10,7 @@ import (
 	"net/http"
 	AtomicIpIterator "openfaas-hypervisor/pkg"
 	AtomicIterator "openfaas-hypervisor/pkg"
+	Stats "openfaas-hypervisor/pkg"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -39,6 +40,8 @@ var functionReadyChannels sync.Map
 
 var ipIterator = AtomicIpIterator.ParseIP(bridgeIp)
 var tapIterator = AtomicIterator.New()
+
+var stats = Stats.NewStats()
 
 func main() {
 	// Check for kvm access
@@ -110,6 +113,7 @@ func main() {
 	http.HandleFunc("/ready", registerInstanceReady)
 	http.HandleFunc("/system/functions", getDeployedFunctions)
 	http.HandleFunc("/system/functions/", getFunctionSummary)
+	http.HandleFunc("/stats", getStats)
 
 	fmt.Printf("Server up!!\n")
 	err = http.ListenAndServe(":8080", nil)
@@ -184,7 +188,7 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 
 	setInstanceReady(functionInstance)
 	elapsed := time.Since(start)
-	fmt.Printf("Function invoke took: %s\n", elapsed)
+	stats.AddFuncExecTimeNano(elapsed.Nanoseconds())
 }
 
 // Get a ready function instance and removes it from the ready list
@@ -208,18 +212,15 @@ func setInstanceReady(functionInstance InstanceMetadata) {
 // Register that a function VM has booted and is ready to be invoked
 func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	instanceIP := strings.Split((*r).RemoteAddr, ":")[0]
-	metadataAny, ok := functionInstanceMetadata.Load(instanceIP)
+	metadataAny, _ := functionInstanceMetadata.Load(instanceIP)
 	metadata := metadataAny.(InstanceMetadata)
-	if ok {
-		metadata.vmReadyTime = time.Now()
-		functionInstanceMetadata.Store(instanceIP, metadata)
-	}
-	timeElapsed := metadata.vmReadyTime.Sub(metadata.vmStartTime)
-	fmt.Printf("Function ready to be invoked after %s\n", timeElapsed)
+	timeElapsed := time.Now().Sub(metadata.vmStartTime)
 	setInstanceReady(metadata)
 	channel, _ := functionReadyChannels.LoadAndDelete(instanceIP)
 	channel.(chan string) <- instanceIP
 	close(channel.(chan string))
+	// do this last to prevent locks from slowing down function execution
+	stats.AddVmInitTimeNano(timeElapsed.Nanoseconds())
 }
 
 func RandomMacAddress() string {
@@ -339,4 +340,18 @@ func getFunctionSummary(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(functionBytes)
+}
+
+func getStats(w http.ResponseWriter, r *http.Request) {
+	bytes, err := json.Marshal(stats.GetStatsSummary())
+	if err != nil {
+		log.Printf("Failed to stats: %s", err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to marshal stats"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(bytes)
 }

@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"openfaas-hypervisor/pkg"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -37,7 +38,7 @@ const (
 var functionInstanceMetadata sync.Map
 
 // Maps from function name to a pool of ready instances
-var readyFunctionInstances map[string]*sync.Pool = make(map[string]*sync.Pool)
+var readyFunctionInstances map[string]*pkg.VmPool = make(map[string]*pkg.VmPool)
 var functionReadyChannels sync.Map
 
 var firecrackerBinPath string
@@ -77,21 +78,21 @@ func main() {
 		log.Fatal(err)
 	}
 	for _, vm := range vms {
-		functionName := vm.Name()
-		readyFunctionInstances[functionName] = &sync.Pool{
-			New: func() any {
-				// Create channel to indicate that vm has initialised
-				readyChannel := make(chan string)
+		if vm.IsDir() {
+			functionName := vm.Name()
+			readyFunctionInstances[functionName] = pkg.NewPool(
+				func() any {
+					// Create channel to indicate that vm has initialised
+					readyChannel := make(chan string)
+					metadata := provisionFunctionInstance(functionName)
 
-				metadata := provisionFunctionInstance(functionName)
-
-				// Store channel so that it can be accessed by /ready
-				functionReadyChannels.Store(metadata.ip, readyChannel)
-				// wait for instance to be ready
-				<-readyChannel
-
-				return metadata
-			},
+					// Store channel so that it can be accessed by /ready
+					functionReadyChannels.Store(metadata.ip, readyChannel)
+					// wait for instance to be ready
+					<-readyChannel
+					return metadata
+				},
+			)
 		}
 	}
 

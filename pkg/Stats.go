@@ -1,4 +1,4 @@
-package Stats
+package pkg
 
 import (
 	"math"

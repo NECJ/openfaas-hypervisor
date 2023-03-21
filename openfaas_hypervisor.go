@@ -375,6 +375,7 @@ func preBoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := 0; i < number; i++ {
-		provisionFunctionInstance(functionName)
+		metadata := provisionFunctionInstance(functionName)
+		readyFunctionInstances[functionName].Put(metadata)
 	}
 }

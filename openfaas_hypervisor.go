@@ -135,7 +135,7 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	w.Write(body)
 
 	if os.Getenv("DISABLE_VM_REUSE") != "TRUE" {
-		setInstanceReady(functionInstance)
+		readyFunctionInstances[functionInstance.name].Put(functionInstance)
 	}
 
 	elapsed := time.Since(start)
@@ -155,17 +155,12 @@ func getReadyInstance(functionName string) InstanceMetadata {
 	return readyInstance.(InstanceMetadata)
 }
 
-func setInstanceReady(functionInstance InstanceMetadata) {
-	readyFunctionInstances[functionInstance.name].Put(functionInstance)
-}
-
 // Register that a function VM has booted and is ready to be invoked
 func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	instanceIP := strings.Split((*r).RemoteAddr, ":")[0]
 	metadataAny, _ := functionInstanceMetadata.Load(instanceIP)
 	metadata := metadataAny.(InstanceMetadata)
 	timeElapsed := time.Now().Sub(metadata.vmStartTime)
-	setInstanceReady(metadata)
 	channel, loaded := functionReadyChannels.LoadAndDelete(instanceIP)
 	if loaded {
 		channel.(chan string) <- instanceIP

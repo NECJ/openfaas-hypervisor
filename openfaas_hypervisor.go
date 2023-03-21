@@ -9,9 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -210,14 +208,6 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 	if err := m.Start(ctx); err != nil {
 		panic(fmt.Errorf("failed to initialize machine: %v", err))
 	}
-	go func() {
-		pid, _ := m.PID()
-		out, err := exec.Command(`./wss.pl`, `-C`, `-t`, `-d`, `2`, strconv.FormatInt(int64(pid), 10), `0.01`).Output()
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Printf("%s\n", out)
-	}()
 
 	metadata.ip = m.Cfg.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.IP.String()
 	functionInstanceMetadata.Store(metadata.ip, metadata)

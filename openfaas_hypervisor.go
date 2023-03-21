@@ -186,7 +186,10 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	}
 	w.Write(body)
 
-	setInstanceReady(functionInstance)
+	if os.Getenv("DISABLE_VM_REUSE") != "TRUE" {
+		setInstanceReady(functionInstance)
+	}
+
 	elapsed := time.Since(start)
 	stats.AddFuncExecTimeNano(elapsed.Nanoseconds())
 }

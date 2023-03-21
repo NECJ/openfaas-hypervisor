@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -114,6 +115,7 @@ func main() {
 	http.HandleFunc("/system/functions", getDeployedFunctions)
 	http.HandleFunc("/system/functions/", getFunctionSummary)
 	http.HandleFunc("/stats", getStats)
+	http.HandleFunc("/preBoot/", preBoot)
 
 	fmt.Printf("Server up!!\n")
 	err = http.ListenAndServe(":8080", nil)
@@ -219,9 +221,11 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	metadata := metadataAny.(InstanceMetadata)
 	timeElapsed := time.Now().Sub(metadata.vmStartTime)
 	setInstanceReady(metadata)
-	channel, _ := functionReadyChannels.LoadAndDelete(instanceIP)
-	channel.(chan string) <- instanceIP
-	close(channel.(chan string))
+	channel, loaded := functionReadyChannels.LoadAndDelete(instanceIP)
+	if loaded {
+		channel.(chan string) <- instanceIP
+		close(channel.(chan string))
+	}
 	// do this last to prevent locks from slowing down function execution
 	stats.AddVmInitTimeNano(timeElapsed.Nanoseconds())
 }
@@ -357,4 +361,25 @@ func getStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(bytes)
+}
+
+func preBoot(w http.ResponseWriter, r *http.Request) {
+	functionName := strings.TrimPrefix(r.URL.Path, "/preBoot/")
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read number of vms to boot: %s", err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to read number of vms to boot"))
+		return
+	}
+	number, err := strconv.Atoi(string(bodyBytes))
+	if err != nil {
+		log.Printf("Failed to read number of vms to boot: %s", err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to read number of vms to boot"))
+		return
+	}
+	for i := 0; i < number; i++ {
+		provisionFunctionInstance(functionName)
+	}
 }

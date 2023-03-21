@@ -269,14 +269,6 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 		log.Fatal(err)
 	}
 	metadata.process = targetCmd.Process
-	go func() {
-		out, err := exec.Command(`./wss.pl`, `-C`, `-t`, `-d`, `1`, strconv.FormatInt(int64(metadata.process.Pid), 10), `0.001`).Output()
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Printf("%s\n", out)
-	}()
-
 	functionInstanceMetadata.Store(metadata.ip, metadata)
 	return metadata
 }

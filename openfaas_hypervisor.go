@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"openfaas-hypervisor/pkg"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -95,6 +96,14 @@ func main() {
 			)
 		}
 	}
+
+	// Shutdown server properly
+	go func() {
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt)
+		<-sigint
+		os.Exit(0)
+	}()
 
 	http.HandleFunc("/function/", invokeFunction)
 	http.HandleFunc("/ready", registerInstanceReady)

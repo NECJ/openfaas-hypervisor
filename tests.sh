@@ -7,6 +7,7 @@ cold_start()
    echo "NumbInitVms,VmInitTimeNanoAvg,VmInitTimeNanoStd,FuncExecTimeNanoAvg,FuncExecTimeNanoStd" >> $datafile
    for invokes in $(seq 1 5 100)
    do
+      echo "NUMBER: $invokes"
       # Start server
       DISABLE_VM_REUSE=TRUE ./openfaas_hypervisor &
       openfaas_pid=$!

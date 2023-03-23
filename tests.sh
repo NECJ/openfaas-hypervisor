@@ -7,7 +7,7 @@ cold_start()
    echo "NumbInitVms,VmInitTimeNanoAvg,VmInitTimeNanoStd,FuncExecTimeNanoAvg,FuncExecTimeNanoStd" >> $datafile
    for invokes in $(seq 1 5 100)
    do
-      echo "NUMBER: $invokes"
+      echo "Number: $invokes"
       # Start server
       DISABLE_VM_REUSE=TRUE ./openfaas_hypervisor &
       openfaas_pid=$!
@@ -32,6 +32,7 @@ cold_start()
       curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .VmInitTimeNanoAvg, .VmInitTimeNanoStd, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd] | @csv' >> $datafile
 
       # End server
+      echo "Shutting down server..."
       kill -SIGINT $openfaas_pid
       wait $openfaas_pid
    done
@@ -44,6 +45,7 @@ warm_start()
    echo "NumbInitVms,FuncExecTimeNanoAvg,FuncExecTimeNanoStd" >> $datafile
    for invokes in $(seq 1 5 100)
    do
+      echo "Number: $invokes"
       # Start server
       ./openfaas_hypervisor &
       openfaas_pid=$!
@@ -78,6 +80,7 @@ warm_start()
       curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd] | @csv' >> $datafile
 
       # End server
+      echo "Shutting down server..."
       kill -SIGINT $openfaas_pid
       wait $openfaas_pid
    done

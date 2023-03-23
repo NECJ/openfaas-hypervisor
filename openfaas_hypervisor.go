@@ -62,19 +62,19 @@ func main() {
 	createBridgeCmd := exec.Command(`ip`, `link`, `add`, bridgeName, `type`, `bridge`)
 	err = createBridgeCmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to create bridge: %s", err)
 	}
 
 	addIpCmd := exec.Command(`ip`, `a`, `a`, bridgeIp+`/`+bridgeMask, `dev`, bridgeName)
 	err = addIpCmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to assign ip to bridge: %s", err)
 	}
 
 	upCmd := exec.Command(`ip`, `link`, `set`, `dev`, bridgeName, `up`)
 	err = upCmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to bring bridge up: %s", err)
 	}
 
 	// Shutdown server properly
@@ -266,7 +266,7 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 	metadata.ip = ipIterator.Next()
 	macAddr := RandomMacAddress()
 	kernelPath := fmt.Sprintf(kernelPathTemplate, functionName)
-	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-nographic`, `-m`, `4M`)
+	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-nographic`, `-m`, `5M`)
 	metadata.vmStartTime = time.Now()
 	err = targetCmd.Start()
 	if err != nil {

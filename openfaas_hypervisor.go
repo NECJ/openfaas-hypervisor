@@ -266,7 +266,7 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 	metadata.ip = ipIterator.Next()
 	macAddr := RandomMacAddress()
 	kernelPath := fmt.Sprintf(kernelPathTemplate, functionName)
-	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-enable-kvm`, `-nographic`, `-m`, `5M`)
+	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-smp`, `1`, `-enable-kvm`, `-nographic`, `-m`, `5M`)
 	metadata.vmStartTime = time.Now()
 	err = targetCmd.Start()
 	if err != nil {

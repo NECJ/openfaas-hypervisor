@@ -67,43 +67,56 @@ double compute_pi() {
         op *= -1;
     }
 
-	printf("%f", result);
-
 	clock_gettime(CLOCK_MONOTONIC, &end);
 
 	return ((double)end.tv_sec + 1.0e-9*end.tv_nsec) - ((double)start.tv_sec + 1.0e-9*start.tv_nsec);
 }
 
 void register_ready(char *ip) {
+	printf("Registering as Ready!\n");
 	int valread, client_fd;
     struct sockaddr_in serv_addr;
     char buffer[1024] = { 0 };
+	printf("Opening socket: ");
     if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        printf("\n Socket creation error \n");
+		perror("Socket creation error: ");
         exit(-1);
     }
-  
+	printf("Done\n");
+
+	printf("Init serv_addr: ");
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(HOST_PORT);
   
     // Convert IPv4 and IPv6 addresses from text to binary
     // form
     if (inet_pton(AF_INET, ip, &serv_addr.sin_addr)<= 0) {
-        printf("\nInvalid address/ Address not supported \n");
+		perror("Invalid address/ Address not supported: ");
         exit(-1);
     }
+	printf("Done\n");
 	
+	printf("Concerting to hv: ");
     if (connect(client_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-        printf("\nConnection Failed \n");
+		perror("Connection Failed: ");
         exit(-1);
     }
-    send(client_fd, readyMessage, strlen(readyMessage), 0);
-    printf("Register message sent!\n");
+	printf("Done\n");
+	printf("Registering as ready: ");
+    if(send(client_fd, readyMessage, strlen(readyMessage), 0) == -1) {
+		perror("Failed to send ready message: ");
+        exit(-1);
+	}
+	printf("Done\n");
+	printf("Waiting for response: ");
+	if (read(client_fd, buffer, 1024) == -1) {
+		perror("Error reading response: ");
+        exit(-1);
+    }
+	printf("Done\n");
 
     // closing the connected socket
-	printf("Closing socket!\n");
     close(client_fd);
-	printf("socket closed!\n");
 }
 
 int main(int argc, char *argv[])
@@ -113,28 +126,34 @@ int main(int argc, char *argv[])
 	ssize_t n;
 	struct sockaddr_in srv_addr;
 
+	printf("Open socket: ");
 	srv = socket(AF_INET, SOCK_STREAM, 0);
 	if (srv < 0) {
-		fprintf(stderr, "Failed to create socket: %d\n", errno);
+		perror("Failed to create socket: ");
 		goto out;
 	}
+	printf("Done\n");
 
 	srv_addr.sin_family = AF_INET;
 	srv_addr.sin_addr.s_addr = INADDR_ANY;
 	srv_addr.sin_port = htons(LISTEN_PORT);
 
+	printf("Binding to port: ");
 	rc = bind(srv, (struct sockaddr *) &srv_addr, sizeof(srv_addr));
 	if (rc < 0) {
-		fprintf(stderr, "Failed to bind socket: %d\n", errno);
+		perror("Failed to bind socket: ");
 		goto out;
 	}
+	printf("Done\n");
 
 	/* Accept one simultaneous connection */
+	printf("Start listening on port: ");
 	rc = listen(srv, 1);
 	if (rc < 0) {
-		fprintf(stderr, "Failed to listen on socket: %d\n", errno);
+		perror("Failed to listen on socket: ");
 		goto out;
 	}
+	printf("Done\n");
 
 	// register as ready with hypervisor
 	register_ready(argv[1]);
@@ -143,21 +162,22 @@ int main(int argc, char *argv[])
 	while (1) {
 		client = accept(srv, NULL, 0);
 		if (client < 0) {
-			fprintf(stderr,
-				"Failed to accept incoming connection: %d\n",
-				errno);
+			perror("Failed to accept incoming connection: ");
 			goto out;
 		}
 
 		/* Receive some bytes (ignore errors) */
-		read(client, recvbuf, BUFLEN);
+		if (read(client, recvbuf, BUFLEN) == -1) {
+			perror("Error reading response: ");
+			exit(-1);
+		}
 
 		/* Send reply */
 		char reply[strlen(reply_template)+4];
 		sprintf(reply, reply_template, compute_pi());
 		n = write(client, reply, sizeof(reply) - 1);
 		if (n < 0)
-			fprintf(stderr, "Failed to send a reply\n");
+			perror("Failed to send a reply: ");
 		else
 			printf("Sent a reply\n");
 
@@ -166,5 +186,6 @@ int main(int argc, char *argv[])
 	}
 
 out:
+	printf("Exiting\n");
 	return 0;
 }

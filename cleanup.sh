@@ -1,5 +1,7 @@
 sudo kill $(pgrep openfaas_hyperv) &>/dev/null
 
+sudo kill $(pgrep qemu) &>/dev/null
+
 sudo ip link set dev ofhbr down &>/dev/null
 sudo brctl delbr ofhbr &>/dev/null
 for i in $(seq 1 100)

@@ -59,22 +59,19 @@ func main() {
 	}
 
 	// setup network bridge
-	createBridgeCmd := exec.Command(`ip`, `link`, `add`, bridgeName, `type`, `bridge`)
-	err = createBridgeCmd.Run()
+	out, err := exec.Command(`ip`, `link`, `add`, bridgeName, `type`, `bridge`).Output()
 	if err != nil {
-		log.Fatalf("Failed to create bridge: %s", err)
+		log.Fatalf("Failed to create bridge: %s, %s", err.(*exec.ExitError).Stderr, out)
 	}
 
-	addIpCmd := exec.Command(`ip`, `a`, `a`, bridgeIp+`/`+bridgeMask, `dev`, bridgeName)
-	err = addIpCmd.Run()
+	out, err = exec.Command(`ip`, `a`, `a`, bridgeIp+`/`+bridgeMask, `dev`, bridgeName).Output()
 	if err != nil {
-		log.Fatalf("Failed to assign ip to bridge: %s", err)
+		log.Fatalf("Failed to assign ip to bridge: %s, %s", err.(*exec.ExitError).Stderr, out)
 	}
 
-	upCmd := exec.Command(`ip`, `link`, `set`, `dev`, bridgeName, `up`)
-	err = upCmd.Run()
+	out, err = exec.Command(`ip`, `link`, `set`, `dev`, bridgeName, `up`).Output()
 	if err != nil {
-		log.Fatalf("Failed to bring bridge up: %s", err)
+		log.Fatalf("Failed to bring bridge up: %s, %s", err.(*exec.ExitError).Stderr, out)
 	}
 
 	// Shutdown server properly
@@ -141,28 +138,25 @@ func shutdown() {
 	// remove tap devices
 	val := tapIterator.Next()
 	for i := 0; i < val; i++ {
-		downTapCmd := exec.Command(`ip`, `link`, `set`, `dev`, tapBaseName+strconv.FormatInt(int64(i), 10), `down`)
-		err := downTapCmd.Run()
+		tapName := tapBaseName + strconv.FormatInt(int64(i), 10)
+		out, err := exec.Command(`ip`, `link`, `set`, `dev`, tapName, `down`).Output()
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("Failed to take down %s: %s, %s", tapName, err.(*exec.ExitError).Stderr, out)
 		}
-		deleteTapCmd := exec.Command(`ip`, `tuntap`, `del`, `dev`, tapBaseName+strconv.FormatInt(int64(i), 10), `mode`, `tap`)
-		err = deleteTapCmd.Run()
+		out, err = exec.Command(`ip`, `tuntap`, `del`, `dev`, tapName, `mode`, `tap`).Output()
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("Failed to delete %s: %s, %s", tapName, err.(*exec.ExitError).Stderr, out)
 		}
 	}
 
-	downCmd := exec.Command(`ip`, `l`, `set`, `dev`, bridgeName, `down`)
-	err := downCmd.Run()
+	out, err := exec.Command(`ip`, `l`, `set`, `dev`, bridgeName, `down`).Output()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to take down %s: %s, %s", bridgeName, err.(*exec.ExitError).Stderr, out)
 	}
 
-	deleteBridgeCmd := exec.Command(`brctl`, `delbr`, bridgeName)
-	err = deleteBridgeCmd.Run()
+	out, err = exec.Command(`brctl`, `delbr`, bridgeName).Output()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to delete %s: %s, %s", bridgeName, err.(*exec.ExitError).Stderr, out)
 	}
 
 	os.Exit(0)
@@ -239,26 +233,23 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 	tapName := tapBaseName + strconv.FormatInt(int64(tapIterator.Next()), 10)
 
 	// create tap device
-	createTapCmd := exec.Command(`ip`, `tuntap`, `add`, `dev`, tapName, `mode`, `tap`)
-	err := createTapCmd.Run()
+	out, err := exec.Command(`ip`, `tuntap`, `add`, `dev`, tapName, `mode`, `tap`).Output()
 	if err != nil {
-		fmt.Printf("Error creating tap device: %s\n", err)
+		fmt.Printf("Error creating tap device: %s, %s\n", err.(*exec.ExitError).Stderr, out)
 		shutdown()
 	}
 
 	// attach tap to bridge
-	attachTapCmd := exec.Command(`ip`, `link`, `set`, `dev`, tapName, `master`, bridgeName)
-	err = attachTapCmd.Run()
+	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `master`, bridgeName).Output()
 	if err != nil {
-		fmt.Printf("Error attaching tap device to bridge: %s\n", err)
+		fmt.Printf("Error attaching tap device to bridge: %s, %s\n", err.(*exec.ExitError).Stderr, out)
 		shutdown()
 	}
 
 	// bring tap up
-	bringTapUpCmd := exec.Command(`ip`, `link`, `set`, `dev`, tapName, `up`)
-	err = bringTapUpCmd.Run()
+	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `up`).Output()
 	if err != nil {
-		fmt.Printf("Error bringing tap up: %s\n", err)
+		fmt.Printf("Error bringing tap up: %s, %s\n", err.(*exec.ExitError).Stderr, out)
 		shutdown()
 	}
 
@@ -266,13 +257,14 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 	metadata.ip = ipIterator.Next()
 	macAddr := RandomMacAddress()
 	kernelPath := fmt.Sprintf(kernelPathTemplate, functionName)
-	targetCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-smp`, `1`, `-enable-kvm`, `-nographic`, `-m`, `5M`)
+	qemuCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-smp`, `1`, `-enable-kvm`, `-nographic`, `-m`, `5M`)
 	metadata.vmStartTime = time.Now()
-	err = targetCmd.Start()
+
+	err = qemuCmd.Start()
 	if err != nil {
 		log.Fatal(err)
 	}
-	metadata.process = targetCmd.Process
+	metadata.process = qemuCmd.Process
 	functionInstanceMetadata.Store(metadata.ip, metadata)
 	return metadata
 }

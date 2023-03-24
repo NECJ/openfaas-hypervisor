@@ -5,7 +5,7 @@ cold_start()
    # Create data file
    datafile="cold_start_data.csv"
    echo "NumbInitVms,VmInitTimeNanoAvg,VmInitTimeNanoStd,FuncExecTimeNanoAvg,FuncExecTimeNanoStd" >> $datafile
-   for invokes in $(seq 1 5 100)
+   for invokes in $(seq 1 5 1000)
    do
       echo "Number: $invokes"
       # Start server
@@ -14,7 +14,7 @@ cold_start()
       trap "kill -SIGINT $openfaas_pid" EXIT
 
       # Wait for server to start up
-      sleep 1
+      sleep 4
 
       # Invoke function
       curlPids=()
@@ -28,6 +28,8 @@ cold_start()
          wait $pid
       done
 
+      sleep 4
+
       # Get stats
       curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .VmInitTimeNanoAvg, .VmInitTimeNanoStd, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd] | @csv' >> $datafile
 
@@ -35,6 +37,7 @@ cold_start()
       echo "Shutting down server..."
       kill -SIGINT $openfaas_pid
       wait $openfaas_pid
+      sleep 4
    done
 }
 
@@ -43,7 +46,7 @@ warm_start()
    # Create data file
    datafile="warm_start_data.csv"
    echo "NumbInitVms,FuncExecTimeNanoAvg,FuncExecTimeNanoStd" >> $datafile
-   for invokes in $(seq 1 5 100)
+   for invokes in $(seq 1 5 1000)
    do
       echo "Number: $invokes"
       # Start server
@@ -52,7 +55,7 @@ warm_start()
       trap "kill -SIGINT $openfaas_pid" EXIT
 
       # Wait for server to start up
-      sleep 1
+      sleep 4
 
       # Pre-boot VMs
       curl -X POST --data-raw $invokes 'localhost:8080/preBoot/calc-pi'
@@ -76,6 +79,8 @@ warm_start()
          wait $pid
       done
 
+      sleep 4
+
       # Get stats
       curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd] | @csv' >> $datafile
 
@@ -83,6 +88,7 @@ warm_start()
       echo "Shutting down server..."
       kill -SIGINT $openfaas_pid
       wait $openfaas_pid
+      sleep 4
    done
 }
 

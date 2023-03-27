@@ -5,7 +5,7 @@ cold_start()
    # Create data file
    datafile="cold_start_data.csv"
    echo "NumbInitVms,VmInitTimeNanoAvg,VmInitTimeNanoStd,FuncExecTimeNanoAvg,FuncExecTimeNanoStd" >> $datafile
-   for invokes in $(seq 1 5 1000)
+   for invokes in $(seq 1 1 1000)
    do
       echo "Number: $invokes"
       # Start server
@@ -46,7 +46,7 @@ warm_start()
    # Create data file
    datafile="warm_start_data.csv"
    echo "NumbInitVms,FuncExecTimeNanoAvg,FuncExecTimeNanoStd" >> $datafile
-   for invokes in $(seq 1 5 1000)
+   for invokes in $(seq 1 1 1000)
    do
       echo "Number: $invokes"
       # Start server

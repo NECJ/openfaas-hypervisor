@@ -4,7 +4,7 @@ cold_start()
 {
    # Create data file
    datafile="cold_start_data.csv"
-   echo "NumbInitVms,VmInitTimeNanoAvg,VmInitTimeNanoStd,FuncExecTimeNanoAvg,FuncExecTimeNanoStd" >> $datafile
+   echo "NumbInitVms,VmInitTimeNanoAvg,VmInitTimeNanoStd,VmInitTimeNano95,VmInitTimeNanoMax,FuncExecTimeNanoAvg,FuncExecTimeNanoStd,FuncExecTimeNano95,FuncExecTimeNanoMax" >> $datafile
    for invokes in $(seq 1 1 1000)
    do
       echo "Number: $invokes"
@@ -31,7 +31,7 @@ cold_start()
       sleep 4
 
       # Get stats
-      curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .VmInitTimeNanoAvg, .VmInitTimeNanoStd, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd] | @csv' >> $datafile
+      curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .VmInitTimeNanoAvg, .VmInitTimeNanoStd, .VmInitTimeNano95, .VmInitTimeNanoMax, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd, .FuncExecTimeNano95, .FuncExecTimeNanoMax] | @csv' >> $datafile
 
       # End server
       echo "Shutting down server..."

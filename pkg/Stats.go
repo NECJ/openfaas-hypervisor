@@ -2,6 +2,7 @@ package pkg
 
 import (
 	"math"
+	"sort"
 	"sync"
 )
 
@@ -16,8 +17,12 @@ type StatsSummary struct {
 	NumbInitVms         uint16
 	VmInitTimeNanoAvg   int64
 	VmInitTimeNanoStd   float64
+	VmInitTimeNano95    int64
+	VmInitTimeNanoMax   int64
 	FuncExecTimeNanoAvg int64
 	FuncExecTimeNanoStd float64
+	FuncExecTimeNano95  int64
+	FuncExecTimeNanoMax int64
 }
 
 func NewStats() Stats {
@@ -40,15 +45,8 @@ func (s *Stats) GetStatsSummary() StatsSummary {
 	s.vmInitTimeNanoLock.Lock()
 	s.funcExecTimeNanoLock.Lock()
 
-	vmInitTimeNanoLen, vmInitTimeNanoAvg, vmInitTimeNanoStd := computeLenAvgStd(s.vmInitTimeNano)
-	_, funcExecTimeNanoAvg, funcExecTimeNanoStd := computeLenAvgStd(s.funcExecTimeNano)
-
-	var numbFuncExec uint16 = 0
-	var funcExecTimeNanoSum int64 = 0
-	for _, v := range s.funcExecTimeNano {
-		numbFuncExec++
-		funcExecTimeNanoSum += v
-	}
+	vmInitTimeNanoLen, vmInitTimeNanoAvg, vmInitTimeNanoStd, vmInitTimeNano95, vmInitTimeNanoMax := computeLenAvgStd95thMax(s.vmInitTimeNano)
+	_, funcExecTimeNanoAvg, funcExecTimeNanoStd, funcExecTimeNano95, funcExecTimeNanoMax := computeLenAvgStd95thMax(s.funcExecTimeNano)
 
 	s.vmInitTimeNanoLock.Unlock()
 	s.funcExecTimeNanoLock.Unlock()
@@ -57,12 +55,16 @@ func (s *Stats) GetStatsSummary() StatsSummary {
 		NumbInitVms:         vmInitTimeNanoLen,
 		VmInitTimeNanoAvg:   vmInitTimeNanoAvg,
 		VmInitTimeNanoStd:   vmInitTimeNanoStd,
+		VmInitTimeNano95:    vmInitTimeNano95,
+		VmInitTimeNanoMax:   vmInitTimeNanoMax,
 		FuncExecTimeNanoAvg: funcExecTimeNanoAvg,
 		FuncExecTimeNanoStd: funcExecTimeNanoStd,
+		FuncExecTimeNano95:  funcExecTimeNano95,
+		FuncExecTimeNanoMax: funcExecTimeNanoMax,
 	}
 }
 
-func computeLenAvgStd(data []int64) (uint16, int64, float64) {
+func computeLenAvgStd95thMax(data []int64) (uint16, int64, float64, int64, int64) {
 	var N uint16 = 0
 	var sum int64 = 0
 	for _, v := range data {
@@ -70,7 +72,7 @@ func computeLenAvgStd(data []int64) (uint16, int64, float64) {
 		sum += v
 	}
 	if N == 0 {
-		return N, -1, -1
+		return N, -1, -1, -1, -1
 	}
 	var avg int64 = sum / int64(N)
 	var std float64 = 0
@@ -78,5 +80,11 @@ func computeLenAvgStd(data []int64) (uint16, int64, float64) {
 		std += math.Pow(float64(v)-float64(avg), 2)
 	}
 	std = math.Sqrt(std / float64(N))
-	return N, avg, std
+
+	sort.Slice(data, func(i, j int) bool {
+		return data[i] < data[j]
+	})
+	percentile95 := data[int(float64(N)*0.95)]
+
+	return N, avg, std, percentile95, data[N-1]
 }

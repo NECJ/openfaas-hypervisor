@@ -35,7 +35,9 @@ cold_start()
 
       # End server
       echo "Shutting down server..."
-      kill -SIGINT $openfaas_pid
+      if ! kill -SIGINT $openfaas_pid ; then
+         exit
+      fi
       wait $openfaas_pid
       sleep 4
    done

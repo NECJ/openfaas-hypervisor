@@ -8,9 +8,12 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
+	"net"
 	"net/http"
 	"openfaas-hypervisor/pkg"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -18,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	AtomicIpIterator "openfaas-hypervisor/pkg"
+	AtomicIterator "openfaas-hypervisor/pkg"
 	Stats "openfaas-hypervisor/pkg"
 
 	"github.com/firecracker-microvm/firecracker-go-sdk"
@@ -27,12 +32,14 @@ import (
 )
 
 const (
+	bridgeIp           = "172.44.0.1"
+	bridgeMask         = "24"
+	bridgeName         = "ofhbr"
+	tapBaseName        = "ofhtap"
 	kernelImagePath    = "microvms/vmlinux"
 	rootfsPathTemplate = "microvms/%s/rootfs.ext4"
-	// Using default cache directory to ensure collision avoidance on IP allocations
-	cniCacheDir = "/var/lib/cni"
-	networkName = "funcnet"
-	ifName      = "veth0"
+	networkName        = "funcnet"
+	ifName             = "veth0"
 )
 
 // Maps from function instance IP to function metadata
@@ -45,6 +52,9 @@ var functionReadyChannels sync.Map
 var firecrackerBinPath string
 var cniConfDir string
 var cniBinPath []string
+
+var ipIterator = AtomicIpIterator.ParseIP(bridgeIp)
+var tapIterator = AtomicIterator.New()
 
 var stats = Stats.NewStats()
 
@@ -60,6 +70,22 @@ func main() {
 	// Check for root access
 	if x, y := 0, os.Getuid(); x != y {
 		log.Fatal("Root acccess denied")
+	}
+
+	// setup network bridge
+	out, err := exec.Command(`ip`, `link`, `add`, bridgeName, `type`, `bridge`).Output()
+	if err != nil {
+		log.Fatalf("Failed to create bridge: %s, %s", err.(*exec.ExitError).Stderr, out)
+	}
+
+	out, err = exec.Command(`ip`, `a`, `a`, bridgeIp+`/`+bridgeMask, `dev`, bridgeName).Output()
+	if err != nil {
+		log.Fatalf("Failed to assign ip to bridge: %s, %s", err.(*exec.ExitError).Stderr, out)
+	}
+
+	out, err = exec.Command(`ip`, `link`, `set`, `dev`, bridgeName, `up`).Output()
+	if err != nil {
+		log.Fatalf("Failed to bring bridge up: %s, %s", err.(*exec.ExitError).Stderr, out)
 	}
 
 	// Get path to firecracker binary
@@ -132,6 +158,31 @@ func shutdown() {
 		value.(InstanceMetadata).process.Wait()
 		return true
 	})
+
+	// remove tap devices
+	val := tapIterator.Next()
+	for i := 0; i < val; i++ {
+		tapName := tapBaseName + strconv.FormatInt(int64(i), 10)
+		out, err := exec.Command(`ip`, `link`, `set`, `dev`, tapName, `down`).Output()
+		if err != nil {
+			log.Fatalf("Failed to take down %s: %s, %s", tapName, err.(*exec.ExitError).Stderr, out)
+		}
+		out, err = exec.Command(`ip`, `tuntap`, `del`, `dev`, tapName, `mode`, `tap`).Output()
+		if err != nil {
+			log.Fatalf("Failed to delete %s: %s, %s", tapName, err.(*exec.ExitError).Stderr, out)
+		}
+	}
+
+	out, err := exec.Command(`ip`, `l`, `set`, `dev`, bridgeName, `down`).Output()
+	if err != nil {
+		log.Fatalf("Failed to take down %s: %s, %s", bridgeName, err.(*exec.ExitError).Stderr, out)
+	}
+
+	out, err = exec.Command(`brctl`, `delbr`, bridgeName).Output()
+	if err != nil {
+		log.Fatalf("Failed to delete %s: %s, %s", bridgeName, err.(*exec.ExitError).Stderr, out)
+	}
+
 	os.Exit(0)
 }
 
@@ -193,8 +244,39 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	stats.AddVmInitTimeNano(timeElapsed.Nanoseconds())
 }
 
+func RandomMacAddress() string {
+	macAddress := "00:"
+	for i := 0; i < 5; i++ {
+		macAddress += fmt.Sprintf("%02x", rand.Intn(256)) + ":"
+	}
+	return strings.TrimRight(macAddress, ":")
+}
+
 func provisionFunctionInstance(functionName string) InstanceMetadata {
 	ctx := context.Background()
+
+	tapName := tapBaseName + strconv.FormatInt(int64(tapIterator.Next()), 10)
+
+	// create tap device
+	out, err := exec.Command(`ip`, `tuntap`, `add`, `dev`, tapName, `mode`, `tap`).Output()
+	if err != nil {
+		fmt.Printf("Error creating tap device: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+		shutdown()
+	}
+
+	// attach tap to bridge
+	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `master`, bridgeName).Output()
+	if err != nil {
+		fmt.Printf("Error attaching tap device to bridge: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+		shutdown()
+	}
+
+	// bring tap up
+	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `up`).Output()
+	if err != nil {
+		fmt.Printf("Error bringing tap up: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+		shutdown()
+	}
 
 	// Setup socket path
 	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-vm")
@@ -206,13 +288,19 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 
 	cmd := firecracker.VMCommandBuilder{}.WithSocketPath(socketPath).WithBin(firecrackerBinPath).Build(ctx)
 
+	metadata := InstanceMetadata{name: functionName}
+	metadata.ip = ipIterator.Next()
+	macAddr := RandomMacAddress()
+	_, ipnet, _ := net.ParseCIDR(metadata.ip + "/" + bridgeMask)
 	networkInterfaces := []firecracker.NetworkInterface{{
-		CNIConfiguration: &firecracker.CNIConfiguration{
-			NetworkName: networkName,
-			IfName:      ifName,
-			ConfDir:     cniConfDir,
-			BinPath:     cniBinPath,
-			VMIfName:    "eth0",
+		StaticConfiguration: &firecracker.StaticNetworkConfiguration{
+			MacAddress:  macAddr,
+			HostDevName: tapName,
+			IPConfiguration: &firecracker.IPConfiguration{
+				IPAddr:  net.IPNet{IP: net.ParseIP(metadata.ip), Mask: ipnet.Mask},
+				Gateway: net.ParseIP(bridgeIp),
+				IfName:  "eth0",
+			},
 		},
 	}}
 
@@ -234,7 +322,7 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 		shutdown()
 	}
 
-	metadata := InstanceMetadata{vmStartTime: time.Now(), name: functionName}
+	metadata.vmStartTime = time.Now()
 	if err := m.Start(ctx); err != nil {
 		log.Printf("failed to initialize machine: %v", err)
 		shutdown()

@@ -1,11 +1,14 @@
 sudo kill $(pgrep openfaas_hyperv) &>/dev/null
 
-sudo kill $(pgrep qemu) &>/dev/null
+sudo kill $(pgrep firecracker) &>/dev/null
 
-for veth in $(ip addr | grep "veth" | cut -d' ' -f2 | sed 's/://' | sed 's/@if2//'); 
+sudo ip link set dev ofhbr down &>/dev/null
+sudo brctl delbr ofhbr &>/dev/null
+
+for veth in $(ip addr | grep "ofhtap" | cut -d' ' -f2 | sed 's/://'); 
 do 
-    sudo ifconfig $veth down
-    sudo ip link del $veth
+    sudo ip link set dev $veth down &>/dev/null
+    sudo ip tuntap del dev $veth mode tap &>/dev/null
 done
 
 sudo rm -r /tmp/openfaas-hypervisor-vm*

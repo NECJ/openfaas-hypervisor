@@ -73,6 +73,14 @@ func main() {
 	cniConfDir = filepath.Join(dir, "cni/config")
 	cniBinPath = []string{filepath.Join(dir, "cni/bin")} // CNI binaries
 
+	// Shutdown server properly
+	go func() {
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt)
+		<-sigint
+		shutdown()
+	}()
+
 	// initialise readyFunctionInstances
 	vms, err := os.ReadDir("./microvms")
 	if err != nil {
@@ -85,25 +93,19 @@ func main() {
 				func() any {
 					// Create channel to indicate that vm has initialised
 					readyChannel := make(chan string)
+
 					metadata := provisionFunctionInstance(functionName)
 
 					// Store channel so that it can be accessed by /ready
 					functionReadyChannels.Store(metadata.ip, readyChannel)
 					// wait for instance to be ready
 					<-readyChannel
+
 					return metadata
 				},
 			)
 		}
 	}
-
-	// Shutdown server properly
-	go func() {
-		sigint := make(chan os.Signal, 1)
-		signal.Notify(sigint, os.Interrupt)
-		<-sigint
-		os.Exit(0)
-	}()
 
 	http.HandleFunc("/function/", invokeFunction)
 	http.HandleFunc("/ready", registerInstanceReady)
@@ -119,8 +121,18 @@ func main() {
 		fmt.Printf("server closed\n")
 	} else if err != nil {
 		fmt.Printf("error starting server: %s\n", err)
-		os.Exit(1)
+		shutdown()
 	}
+}
+
+func shutdown() {
+	// shutdown instances
+	functionInstanceMetadata.Range(func(key, value any) bool {
+		value.(InstanceMetadata).process.Signal(os.Interrupt)
+		value.(InstanceMetadata).process.Wait()
+		return true
+	})
+	os.Exit(0)
 }
 
 func invokeFunction(w http.ResponseWriter, req *http.Request) {
@@ -134,7 +146,7 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		fmt.Printf("Error invoking function: %s\n", err)
 		http.Error(w, "Error invoking function", http.StatusInternalServerError)
-		os.Exit(1)
+		shutdown()
 	}
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
@@ -158,7 +170,8 @@ func getReadyInstance(functionName string) InstanceMetadata {
 	for readyInstance == nil {
 		instancePool := readyFunctionInstances[functionName]
 		if instancePool == nil {
-			log.Fatal("Compiled function '" + functionName + "' does not exist.")
+			log.Printf("Compiled function '" + functionName + "' does not exist.")
+			shutdown()
 		}
 		readyInstance = instancePool.Get()
 	}
@@ -186,7 +199,8 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 	// Setup socket path
 	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-vm")
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Error creating firecracker socket: %s", err)
+		shutdown()
 	}
 	socketPath := filepath.Join(tempdir, "socket")
 
@@ -216,15 +230,23 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 
 	m, err := firecracker.NewMachine(ctx, cfg, firecracker.WithProcessRunner(cmd))
 	if err != nil {
-		panic(fmt.Errorf("failed to create new machine: %v", err))
+		log.Printf("failed to create new machine: %v", err)
+		shutdown()
 	}
 
 	metadata := InstanceMetadata{vmStartTime: time.Now(), name: functionName}
 	if err := m.Start(ctx); err != nil {
-		panic(fmt.Errorf("failed to initialize machine: %v", err))
+		log.Printf("failed to initialize machine: %v", err)
+		shutdown()
 	}
 
 	metadata.ip = m.Cfg.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.IP.String()
+	pid, err := m.PID()
+	if err != nil {
+		log.Printf("failed to obtain machines PID: %v", err)
+		shutdown()
+	}
+	metadata.process = &os.Process{Pid: pid}
 	functionInstanceMetadata.Store(metadata.ip, metadata)
 	return metadata
 }
@@ -234,6 +256,7 @@ type InstanceMetadata struct {
 	ip          string
 	name        string
 	vmStartTime time.Time
+	process     *os.Process
 }
 
 func getDeployedFunctions(w http.ResponseWriter, r *http.Request) {

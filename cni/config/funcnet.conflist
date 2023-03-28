@@ -6,7 +6,7 @@
             "type": "ptp",
             "ipam": {
                 "type": "host-local",
-                "subnet": "10.168.0.0/24"
+                "subnet": "10.168.0.0/16"
             }
         },
         {

@@ -37,7 +37,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
-#include <stdlib.h>
 #include <time.h>
 
 #define HOST_PORT 8080
@@ -69,7 +68,7 @@ double compute_pi() {
 
 	clock_gettime(CLOCK_MONOTONIC, &end);
 
-	return ((double)end.tv_sec + 1.0e-9*end.tv_nsec) - ((double)start.tv_sec + 1.0e-9*start.tv_nsec);
+	return result;
 }
 
 void register_ready(char *ip) {

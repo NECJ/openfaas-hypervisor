@@ -33,7 +33,7 @@ import (
 
 const (
 	bridgeIp           = "172.44.0.1"
-	bridgeMask         = "24"
+	bridgeMask         = "16"
 	bridgeName         = "ofhbr"
 	tapBaseName        = "ofhtap"
 	kernelImagePath    = "microvms/vmlinux"

@@ -1,8 +1,10 @@
 FROM alpine
 
+RUN apk add iproute2
 COPY firecracker /
 COPY openfaas_hypervisor /
 COPY cni /cni
 COPY microvms /microvms
 
+ENV OFHTYPE=MICROVM
 CMD ["/openfaas_hypervisor"]

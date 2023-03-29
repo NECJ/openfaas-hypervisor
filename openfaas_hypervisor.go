@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
 	"net/http"
 	"openfaas-hypervisor/pkg"
+	AtomicIpIterator "openfaas-hypervisor/pkg"
+	AtomicIterator "openfaas-hypervisor/pkg"
+	Stats "openfaas-hypervisor/pkg"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -20,10 +24,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	AtomicIpIterator "openfaas-hypervisor/pkg"
-	AtomicIterator "openfaas-hypervisor/pkg"
-	Stats "openfaas-hypervisor/pkg"
 
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
@@ -40,7 +40,19 @@ const (
 	rootfsPathTemplate = "microvms/%s/rootfs.ext4"
 	networkName        = "funcnet"
 	ifName             = "veth0"
+	kernelPathTemplate = "unikernels/%s/build/httpreply_kvm-x86_64"
+	firecrackerBinPath = "./firecracker"
 )
+
+// Enum to determine which mode the hypervisor is running in
+type OFHTYPE int64
+
+const (
+	UNIKERNEL = iota
+	MICROVM   = iota
+)
+
+var ofhtype OFHTYPE
 
 // Maps from function instance IP to function metadata
 var functionInstanceMetadata sync.Map
@@ -49,17 +61,12 @@ var functionInstanceMetadata sync.Map
 var readyFunctionInstances map[string]*pkg.VmPool = make(map[string]*pkg.VmPool)
 var functionReadyChannels sync.Map
 
-var firecrackerBinPath string
-var cniConfDir string
-var cniBinPath []string
-
 var ipIterator = AtomicIpIterator.ParseIP(bridgeIp)
 var tapIterator = AtomicIterator.New()
 
 var stats = Stats.NewStats()
 
 func main() {
-
 	// Check for kvm access
 	err := unix.Access("/dev/kvm", unix.W_OK)
 	if err != nil {
@@ -70,6 +77,13 @@ func main() {
 	// Check for root access
 	if x, y := 0, os.Getuid(); x != y {
 		log.Fatal("Root acccess denied")
+	}
+
+	// Select weather using unikernels or microvms
+	if os.Getenv("OFHTYPE") == "MICROVM" {
+		ofhtype = MICROVM
+	} else {
+		ofhtype = UNIKERNEL
 	}
 
 	// setup network bridge
@@ -88,17 +102,6 @@ func main() {
 		log.Fatalf("Failed to bring bridge up: %s, %s", err.(*exec.ExitError).Stderr, out)
 	}
 
-	// Get path to firecracker binary
-	dir, err := os.Getwd()
-	if err != nil {
-		log.Fatal(err)
-	}
-	firecrackerBinPath = filepath.Join(dir, "firecracker")
-
-	// setup cni paths
-	cniConfDir = filepath.Join(dir, "cni/config")
-	cniBinPath = []string{filepath.Join(dir, "cni/bin")} // CNI binaries
-
 	// Shutdown server properly
 	go func() {
 		sigint := make(chan os.Signal, 1)
@@ -108,7 +111,12 @@ func main() {
 	}()
 
 	// initialise readyFunctionInstances
-	vms, err := os.ReadDir("./microvms")
+	var vms []fs.DirEntry
+	if ofhtype == MICROVM {
+		vms, err = os.ReadDir("./microvms")
+	} else {
+		vms, err = os.ReadDir("./unikernels")
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -119,14 +127,11 @@ func main() {
 				func() any {
 					// Create channel to indicate that vm has initialised
 					readyChannel := make(chan string)
-
 					metadata := provisionFunctionInstance(functionName)
-
 					// Store channel so that it can be accessed by /ready
 					functionReadyChannels.Store(metadata.ip, readyChannel)
 					// wait for instance to be ready
 					<-readyChannel
-
 					return metadata
 				},
 			)
@@ -154,6 +159,7 @@ func main() {
 func shutdown() {
 	// shutdown instances
 	functionInstanceMetadata.Range(func(key, value any) bool {
+		// TODO: check this works on qemu/unikernel
 		value.(InstanceMetadata).process.Signal(os.Interrupt)
 		value.(InstanceMetadata).process.Wait()
 		return true
@@ -252,32 +258,8 @@ func RandomMacAddress() string {
 	return strings.TrimRight(macAddress, ":")
 }
 
-func provisionFunctionInstance(functionName string) InstanceMetadata {
+func runMicroVM(functionName string, metadata *InstanceMetadata, macAddr string, tapName string) {
 	ctx := context.Background()
-
-	tapName := tapBaseName + strconv.FormatInt(int64(tapIterator.Next()), 10)
-
-	// create tap device
-	out, err := exec.Command(`ip`, `tuntap`, `add`, `dev`, tapName, `mode`, `tap`).Output()
-	if err != nil {
-		fmt.Printf("Error creating tap device: %s, %s\n", err.(*exec.ExitError).Stderr, out)
-		shutdown()
-	}
-
-	// attach tap to bridge
-	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `master`, bridgeName).Output()
-	if err != nil {
-		fmt.Printf("Error attaching tap device to bridge: %s, %s\n", err.(*exec.ExitError).Stderr, out)
-		shutdown()
-	}
-
-	// bring tap up
-	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `up`).Output()
-	if err != nil {
-		fmt.Printf("Error bringing tap up: %s, %s\n", err.(*exec.ExitError).Stderr, out)
-		shutdown()
-	}
-
 	// Setup socket path
 	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-vm")
 	if err != nil {
@@ -288,9 +270,6 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 
 	cmd := firecracker.VMCommandBuilder{}.WithSocketPath(socketPath).WithBin(firecrackerBinPath).Build(ctx)
 
-	metadata := InstanceMetadata{name: functionName}
-	metadata.ip = ipIterator.Next()
-	macAddr := RandomMacAddress()
 	_, ipnet, _ := net.ParseCIDR(metadata.ip + "/" + bridgeMask)
 	networkInterfaces := []firecracker.NetworkInterface{{
 		StaticConfiguration: &firecracker.StaticNetworkConfiguration{
@@ -328,13 +307,61 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 		shutdown()
 	}
 
-	metadata.ip = m.Cfg.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.IP.String()
 	pid, err := m.PID()
 	if err != nil {
 		log.Printf("failed to obtain machines PID: %v", err)
 		shutdown()
 	}
 	metadata.process = &os.Process{Pid: pid}
+}
+
+func runUnikernel(functionName string, metadata *InstanceMetadata, macAddr string, tapName string) {
+	kernelPath := fmt.Sprintf(kernelPathTemplate, functionName)
+	qemuCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-smp`, `1`, `-enable-kvm`, `-nographic`, `-m`, `10M`)
+	metadata.vmStartTime = time.Now()
+
+	err := qemuCmd.Start()
+	if err != nil {
+		log.Printf("Error starting qemu: %s", err)
+		shutdown()
+	}
+	metadata.process = qemuCmd.Process
+}
+
+func provisionFunctionInstance(functionName string) InstanceMetadata {
+	tapName := tapBaseName + strconv.FormatInt(int64(tapIterator.Next()), 10)
+
+	// create tap device
+	out, err := exec.Command(`ip`, `tuntap`, `add`, `dev`, tapName, `mode`, `tap`).Output()
+	if err != nil {
+		fmt.Printf("Error creating tap device: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+		shutdown()
+	}
+
+	// attach tap to bridge
+	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `master`, bridgeName).Output()
+	if err != nil {
+		fmt.Printf("Error attaching tap device to bridge: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+		shutdown()
+	}
+
+	// bring tap up
+	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `up`).Output()
+	if err != nil {
+		fmt.Printf("Error bringing tap up: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+		shutdown()
+	}
+
+	metadata := InstanceMetadata{name: functionName}
+	metadata.ip = ipIterator.Next()
+	macAddr := RandomMacAddress()
+
+	if ofhtype == MICROVM {
+		runMicroVM(functionName, &metadata, macAddr, tapName)
+	} else {
+		runUnikernel(functionName, &metadata, macAddr, tapName)
+	}
+
 	functionInstanceMetadata.Store(metadata.ip, metadata)
 	return metadata
 }

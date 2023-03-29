@@ -178,7 +178,12 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 
 	functionName := strings.TrimPrefix(req.URL.Path, "/function/")
 
-	functionInstance := getReadyInstance(functionName)
+	functionInstance, err := getReadyInstance(functionName)
+	if err != nil {
+		log.Printf("Error getting VM instance for function '%s': %s", functionName, err)
+		http.Error(w, "Error getting VM instance for function", http.StatusInternalServerError)
+		return
+	}
 
 	res, err := http.Get("http://" + functionInstance.ip + ":8080/invoke")
 	if err != nil {
@@ -203,17 +208,17 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 }
 
 // Get a ready function instance and removes it from the ready list
-func getReadyInstance(functionName string) InstanceMetadata {
+func getReadyInstance(functionName string) (InstanceMetadata, error) {
 	var readyInstance any = nil
 	for readyInstance == nil {
 		instancePool := readyFunctionInstances[functionName]
 		if instancePool == nil {
-			log.Printf("Compiled function '" + functionName + "' does not exist.")
+			return InstanceMetadata{}, fmt.Errorf("Function %s does not exist.", functionName)
 			shutdown()
 		}
 		readyInstance = instancePool.Get()
 	}
-	return readyInstance.(InstanceMetadata)
+	return readyInstance.(InstanceMetadata), nil
 }
 
 // Register that a function VM has booted and is ready to be invoked

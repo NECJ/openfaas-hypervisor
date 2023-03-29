@@ -47,7 +47,7 @@ warm_start()
 {
    # Create data file
    datafile="warm_start_data.csv"
-   echo "NumbInitVms,FuncExecTimeNanoAvg,FuncExecTimeNanoStd" >> $datafile
+   echo "NumbInitVms,FuncExecTimeNanoAvg,FuncExecTimeNanoStd,FuncExecTimeNano95,FuncExecTimeNanoMax" >> $datafile
    for invokes in $(seq 1 1 1000)
    do
       echo "Number: $invokes"
@@ -84,11 +84,13 @@ warm_start()
       sleep 4
 
       # Get stats
-      curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd] | @csv' >> $datafile
+      curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd, .FuncExecTimeNano95, .FuncExecTimeNanoMax] | @csv' >> $datafile
 
       # End server
       echo "Shutting down server..."
-      kill -SIGINT $openfaas_pid
+      if ! kill -SIGINT $openfaas_pid ; then	
+         exit	
+      fi
       wait $openfaas_pid
       sleep 4
    done

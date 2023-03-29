@@ -9,12 +9,12 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
 	"openfaas-hypervisor/pkg"
 	AtomicIpIterator "openfaas-hypervisor/pkg"
 	AtomicIterator "openfaas-hypervisor/pkg"
+	Network "openfaas-hypervisor/pkg"
 	Stats "openfaas-hypervisor/pkg"
 	"os"
 	"os/exec"
@@ -87,19 +87,10 @@ func main() {
 	}
 
 	// setup network bridge
-	out, err := exec.Command(`ip`, `link`, `add`, bridgeName, `type`, `bridge`).Output()
+	err = Network.AddBridge(bridgeName, bridgeIp, bridgeMask)
 	if err != nil {
-		log.Fatalf("Failed to create bridge: %s, %s", err.(*exec.ExitError).Stderr, out)
-	}
-
-	out, err = exec.Command(`ip`, `a`, `a`, bridgeIp+`/`+bridgeMask, `dev`, bridgeName).Output()
-	if err != nil {
-		log.Fatalf("Failed to assign ip to bridge: %s, %s", err.(*exec.ExitError).Stderr, out)
-	}
-
-	out, err = exec.Command(`ip`, `link`, `set`, `dev`, bridgeName, `up`).Output()
-	if err != nil {
-		log.Fatalf("Failed to bring bridge up: %s, %s", err.(*exec.ExitError).Stderr, out)
+		log.Print(err)
+		shutdown()
 	}
 
 	// Shutdown server properly
@@ -159,7 +150,6 @@ func main() {
 func shutdown() {
 	// shutdown instances
 	functionInstanceMetadata.Range(func(key, value any) bool {
-		// TODO: check this works on qemu/unikernel
 		value.(InstanceMetadata).process.Signal(os.Interrupt)
 		value.(InstanceMetadata).process.Wait()
 		return true
@@ -169,24 +159,15 @@ func shutdown() {
 	val := tapIterator.Next()
 	for i := 0; i < val; i++ {
 		tapName := tapBaseName + strconv.FormatInt(int64(i), 10)
-		out, err := exec.Command(`ip`, `link`, `set`, `dev`, tapName, `down`).Output()
+		err := Network.DeleteTap(tapName)
 		if err != nil {
-			log.Fatalf("Failed to take down %s: %s, %s", tapName, err.(*exec.ExitError).Stderr, out)
-		}
-		out, err = exec.Command(`ip`, `tuntap`, `del`, `dev`, tapName, `mode`, `tap`).Output()
-		if err != nil {
-			log.Fatalf("Failed to delete %s: %s, %s", tapName, err.(*exec.ExitError).Stderr, out)
+			log.Print(err)
 		}
 	}
 
-	out, err := exec.Command(`ip`, `l`, `set`, `dev`, bridgeName, `down`).Output()
+	err := Network.DeleteBridge(bridgeName)
 	if err != nil {
-		log.Fatalf("Failed to take down %s: %s, %s", bridgeName, err.(*exec.ExitError).Stderr, out)
-	}
-
-	out, err = exec.Command(`brctl`, `delbr`, bridgeName).Output()
-	if err != nil {
-		log.Fatalf("Failed to delete %s: %s, %s", bridgeName, err.(*exec.ExitError).Stderr, out)
+		log.Print(err)
 	}
 
 	os.Exit(0)
@@ -248,14 +229,6 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	}
 	// do this last to prevent locks from slowing down function execution
 	stats.AddVmInitTimeNano(timeElapsed.Nanoseconds())
-}
-
-func RandomMacAddress() string {
-	macAddress := "00:"
-	for i := 0; i < 5; i++ {
-		macAddress += fmt.Sprintf("%02x", rand.Intn(256)) + ":"
-	}
-	return strings.TrimRight(macAddress, ":")
 }
 
 func runMicroVM(functionName string, metadata *InstanceMetadata, macAddr string, tapName string) {
@@ -331,30 +304,15 @@ func runUnikernel(functionName string, metadata *InstanceMetadata, macAddr strin
 func provisionFunctionInstance(functionName string) InstanceMetadata {
 	tapName := tapBaseName + strconv.FormatInt(int64(tapIterator.Next()), 10)
 
-	// create tap device
-	out, err := exec.Command(`ip`, `tuntap`, `add`, `dev`, tapName, `mode`, `tap`).Output()
+	err := Network.AddTap(tapName, bridgeName)
 	if err != nil {
-		fmt.Printf("Error creating tap device: %s, %s\n", err.(*exec.ExitError).Stderr, out)
-		shutdown()
-	}
-
-	// attach tap to bridge
-	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `master`, bridgeName).Output()
-	if err != nil {
-		fmt.Printf("Error attaching tap device to bridge: %s, %s\n", err.(*exec.ExitError).Stderr, out)
-		shutdown()
-	}
-
-	// bring tap up
-	out, err = exec.Command(`ip`, `link`, `set`, `dev`, tapName, `up`).Output()
-	if err != nil {
-		fmt.Printf("Error bringing tap up: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+		log.Print(err)
 		shutdown()
 	}
 
 	metadata := InstanceMetadata{name: functionName}
 	metadata.ip = ipIterator.Next()
-	macAddr := RandomMacAddress()
+	macAddr := Network.RandomMacAddress()
 
 	if ofhtype == MICROVM {
 		runMicroVM(functionName, &metadata, macAddr, tapName)

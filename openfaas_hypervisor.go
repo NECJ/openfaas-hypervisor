@@ -59,7 +59,7 @@ var functionInstanceMetadata sync.Map
 
 // Maps from function name to a pool of ready instances
 var readyFunctionInstances map[string]*pkg.VmPool = make(map[string]*pkg.VmPool)
-var functionReadyChannels sync.Map
+var functionReadyConditions sync.Map
 
 var ipIterator = AtomicIpIterator.ParseIP(bridgeIp)
 var tapIterator = AtomicIterator.New()
@@ -117,12 +117,14 @@ func main() {
 			readyFunctionInstances[functionName] = pkg.NewPool(
 				func() any {
 					// Create channel to indicate that vm has initialised
-					readyChannel := make(chan string)
+					readyCondition := sync.NewCond(&sync.Mutex{})
 					metadata := provisionFunctionInstance(functionName)
 					// Store channel so that it can be accessed by /ready
-					functionReadyChannels.Store(metadata.ip, readyChannel)
+					functionReadyConditions.Store(metadata.ip, readyCondition)
 					// wait for instance to be ready
-					<-readyChannel
+					readyCondition.L.Lock()
+					readyCondition.Wait()
+					readyCondition.L.Unlock()
 					return metadata
 				},
 			)
@@ -227,10 +229,11 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	metadataAny, _ := functionInstanceMetadata.Load(instanceIP)
 	metadata := metadataAny.(InstanceMetadata)
 	timeElapsed := time.Now().Sub(metadata.vmStartTime)
-	channel, loaded := functionReadyChannels.LoadAndDelete(instanceIP)
+	condition, loaded := functionReadyConditions.LoadAndDelete(instanceIP)
 	if loaded {
-		channel.(chan string) <- instanceIP
-		close(channel.(chan string))
+		condition.(*sync.Cond).L.Lock()
+		condition.(*sync.Cond).Signal()
+		condition.(*sync.Cond).L.Unlock()
 	}
 	// do this last to prevent locks from slowing down function execution
 	stats.AddVmInitTimeNano(timeElapsed.Nanoseconds())

@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
+	"github.com/google/uuid"
 	FaasProvidertypes "github.com/openfaas/faas-provider/types"
 	"golang.org/x/sys/unix"
 )
@@ -50,6 +52,7 @@ type OFHTYPE int64
 const (
 	UNIKERNEL = iota
 	MICROVM   = iota
+	CONTAINER = iota
 )
 
 var ofhtype OFHTYPE
@@ -82,15 +85,19 @@ func main() {
 	// Select weather using unikernels or microvms
 	if os.Getenv("OFHTYPE") == "MICROVM" {
 		ofhtype = MICROVM
+	} else if os.Getenv("OFHTYPE") == "CONTAINER" {
+		ofhtype = CONTAINER
 	} else {
 		ofhtype = UNIKERNEL
 	}
 
-	// setup network bridge
-	err = Network.AddBridge(bridgeName, bridgeIp, bridgeMask)
-	if err != nil {
-		log.Print(err)
-		shutdown()
+	if ofhtype == MICROVM || ofhtype == UNIKERNEL {
+		// setup network bridge
+		err = Network.AddBridge(bridgeName, bridgeIp, bridgeMask)
+		if err != nil {
+			log.Print(err)
+			shutdown()
+		}
 	}
 
 	// Shutdown server properly
@@ -105,8 +112,13 @@ func main() {
 	var vms []fs.DirEntry
 	if ofhtype == MICROVM {
 		vms, err = os.ReadDir("./microvms")
+		println("Function instances type: microvm")
+	} else if ofhtype == CONTAINER {
+		vms, err = os.ReadDir("./containers")
+		println("Function instances type: container")
 	} else {
 		vms, err = os.ReadDir("./unikernels")
+		println("Function instances type: unikernel")
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -150,26 +162,45 @@ func main() {
 }
 
 func shutdown() {
-	// shutdown instances
-	functionInstanceMetadata.Range(func(key, value any) bool {
-		value.(InstanceMetadata).process.Signal(os.Interrupt)
-		value.(InstanceMetadata).process.Wait()
-		return true
-	})
+	if ofhtype == CONTAINER {
+		// shutdown containers
+		functionInstanceMetadata.Range(func(key, value any) bool {
+			contaienrId := value.(*InstanceMetadata).containerId
+			// containers seem to kill themselves
+			// out, err := exec.Command(`runsc`, `kill`, contaienrId).Output()
+			// if err != nil {
+			// 	fmt.Printf("Failed delete container %s: %s, %s\n", contaienrId, err.(*exec.ExitError).Stderr, out)
+			// }
 
-	// remove tap devices
-	val := tapIterator.Next()
-	for i := 0; i < val; i++ {
-		tapName := tapBaseName + strconv.FormatInt(int64(i), 10)
-		err := Network.DeleteTap(tapName)
+			err := Network.UnbridgeContainer(contaienrId)
+			if err != nil {
+				fmt.Printf("Failed unbridge container %s: %s\n", contaienrId, err)
+			}
+
+			return true
+		})
+	} else {
+		// shutdown VMs
+		functionInstanceMetadata.Range(func(key, value any) bool {
+			value.(*InstanceMetadata).process.Signal(os.Interrupt)
+			value.(*InstanceMetadata).process.Wait()
+			return true
+		})
+
+		// remove tap devices
+		val := tapIterator.Next()
+		for i := 0; i < val; i++ {
+			tapName := tapBaseName + strconv.FormatInt(int64(i), 10)
+			err := Network.DeleteTap(tapName)
+			if err != nil {
+				log.Print(err)
+			}
+		}
+
+		err := Network.DeleteBridge(bridgeName)
 		if err != nil {
 			log.Print(err)
 		}
-	}
-
-	err := Network.DeleteBridge(bridgeName)
-	if err != nil {
-		log.Print(err)
 	}
 
 	os.Exit(0)
@@ -202,7 +233,7 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 	w.Write(body)
 
 	if os.Getenv("DISABLE_VM_REUSE") != "TRUE" {
-		readyFunctionInstances[functionInstance.name].Put(functionInstance)
+		readyFunctionInstances[functionInstance.functionName].Put(functionInstance)
 	}
 
 	elapsed := time.Since(start)
@@ -216,7 +247,6 @@ func getReadyInstance(functionName string) (InstanceMetadata, error) {
 		instancePool := readyFunctionInstances[functionName]
 		if instancePool == nil {
 			return InstanceMetadata{}, fmt.Errorf("Function %s does not exist.", functionName)
-			shutdown()
 		}
 		readyInstance = instancePool.Get()
 	}
@@ -227,7 +257,7 @@ func getReadyInstance(functionName string) (InstanceMetadata, error) {
 func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	instanceIP := strings.Split((*r).RemoteAddr, ":")[0]
 	metadataAny, _ := functionInstanceMetadata.Load(instanceIP)
-	metadata := metadataAny.(InstanceMetadata)
+	metadata := metadataAny.(*InstanceMetadata)
 	timeElapsed := time.Now().Sub(metadata.vmStartTime)
 	condition, loaded := functionReadyConditions.LoadAndDelete(instanceIP)
 	if loaded {
@@ -239,10 +269,13 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	stats.AddVmInitTimeNano(timeElapsed.Nanoseconds())
 }
 
-func runMicroVM(functionName string, metadata *InstanceMetadata, macAddr string, tapName string) {
+func runMicroVM(functionName string, metadata *InstanceMetadata) {
+	tapName, macAddr := configureVmNetworking(metadata)
+	functionInstanceMetadata.Store(metadata.ip, metadata)
+
 	ctx := context.Background()
 	// Setup socket path
-	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-vm")
+	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-")
 	if err != nil {
 		log.Printf("Error creating firecracker socket: %s", err)
 		shutdown()
@@ -296,7 +329,10 @@ func runMicroVM(functionName string, metadata *InstanceMetadata, macAddr string,
 	metadata.process = &os.Process{Pid: pid}
 }
 
-func runUnikernel(functionName string, metadata *InstanceMetadata, macAddr string, tapName string) {
+func runUnikernel(functionName string, metadata *InstanceMetadata) {
+	tapName, macAddr := configureVmNetworking(metadata)
+	functionInstanceMetadata.Store(metadata.ip, metadata)
+
 	kernelPath := fmt.Sprintf(kernelPathTemplate, functionName)
 	qemuCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-smp`, `1`, `-enable-kvm`, `-nographic`, `-m`, `10M`)
 	metadata.vmStartTime = time.Now()
@@ -309,7 +345,67 @@ func runUnikernel(functionName string, metadata *InstanceMetadata, macAddr strin
 	metadata.process = qemuCmd.Process
 }
 
+func runContainer(functionName string, metadata *InstanceMetadata) {
+	metadata.containerId = uuid.New().String()
+
+	// set up networking
+	ip, err := Network.BridgeContainer(metadata.containerId)
+	if err != nil {
+		log.Print(err)
+		shutdown()
+	}
+	metadata.ip = ip
+
+	// create container directory
+	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-")
+	if err != nil {
+		log.Printf("Error creating firecracker socket: %s", err)
+		shutdown()
+	}
+	out, err := exec.Command(`cp`, `-r`, `./containers/`+functionName+`/rootfs`, filepath.Join(tempdir, "rootfs")).Output()
+	if err != nil {
+		log.Printf("Error copying rootfs: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+		shutdown()
+	}
+	containerConfigTemplate, err := os.ReadFile(`./containers/` + functionName + `/config-template.json`)
+	if err != nil {
+		log.Printf("Error reading container config template: %s", err)
+		shutdown()
+	}
+	re := regexp.MustCompile(`<netns>`)
+	err = os.WriteFile(filepath.Join(tempdir, "config.json"), re.ReplaceAll(containerConfigTemplate, []byte(metadata.containerId)), 0644)
+	if err != nil {
+		log.Printf("Error writing container config file: %s", err)
+		shutdown()
+	}
+
+	// run container
+	runscCmd := exec.Command(`runsc`, `run`, `--bundle`, tempdir, metadata.containerId)
+	metadata.vmStartTime = time.Now()
+	functionInstanceMetadata.Store(metadata.ip, metadata)
+
+	err = runscCmd.Start()
+	if err != nil {
+		log.Printf("Error starting runsc: %s", err)
+		shutdown()
+	}
+	metadata.process = runscCmd.Process
+}
+
 func provisionFunctionInstance(functionName string) InstanceMetadata {
+	metadata := InstanceMetadata{functionName: functionName}
+	if ofhtype == MICROVM {
+		runMicroVM(functionName, &metadata)
+	} else if ofhtype == CONTAINER {
+		runContainer(functionName, &metadata)
+	} else {
+		runUnikernel(functionName, &metadata)
+	}
+
+	return metadata
+}
+
+func configureVmNetworking(metadata *InstanceMetadata) (string, string) {
 	tapName := tapBaseName + strconv.FormatInt(int64(tapIterator.Next()), 10)
 
 	err := Network.AddTap(tapName, bridgeName)
@@ -318,26 +414,19 @@ func provisionFunctionInstance(functionName string) InstanceMetadata {
 		shutdown()
 	}
 
-	metadata := InstanceMetadata{name: functionName}
 	metadata.ip = ipIterator.Next()
 	macAddr := Network.RandomMacAddress()
 
-	if ofhtype == MICROVM {
-		runMicroVM(functionName, &metadata, macAddr, tapName)
-	} else {
-		runUnikernel(functionName, &metadata, macAddr, tapName)
-	}
-
-	functionInstanceMetadata.Store(metadata.ip, metadata)
-	return metadata
+	return tapName, macAddr
 }
 
 // InstanceMetadata holds information about each function instance (VM)
 type InstanceMetadata struct {
-	ip          string
-	name        string
-	vmStartTime time.Time
-	process     *os.Process
+	ip           string
+	functionName string
+	vmStartTime  time.Time
+	process      *os.Process
+	containerId  string
 }
 
 func getDeployedFunctions(w http.ResponseWriter, r *http.Request) {

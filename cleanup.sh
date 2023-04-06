@@ -12,4 +12,4 @@ do
     sudo ip tuntap del dev $veth mode tap &>/dev/null
 done
 
-sudo rm -r /tmp/openfaas-hypervisor-vm*
+sudo rm -r /tmp/openfaas-hypervisor-*

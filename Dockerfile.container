@@ -1,0 +1,12 @@
+FROM alpine
+
+RUN apk add iproute2
+RUN apk add iptables
+RUN apk add ip6tables 
+COPY install_runsc.sh /
+RUN ./install_runsc.sh
+COPY openfaas_hypervisor /
+COPY containers /containers
+
+ENV OFHTYPE=CONTAINER
+CMD ["/openfaas_hypervisor"]

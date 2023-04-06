@@ -1,8 +1,10 @@
 package pkg
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -77,4 +79,58 @@ func RandomMacAddress() string {
 		macAddress += fmt.Sprintf("%02x", rand.Intn(256)) + ":"
 	}
 	return strings.TrimRight(macAddress, ":")
+}
+
+func BridgeContainer(containerId string) (string, error) {
+	out, err := exec.Command(`ip`, `netns`, `add`, containerId).Output()
+	if err != nil {
+		return "", fmt.Errorf("Error creating network namespace: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+	}
+
+	bridgeCmd := exec.Command(`./containers/bridge`)
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("Failed to get current working directory: %s\n", err)
+	}
+	bridgeCmd.Env = []string{"CNI_COMMAND=ADD", "CNI_CONTAINERID=" + containerId, "CNI_NETNS=/run/netns/" + containerId, "CNI_IFNAME=eth0", "CNI_PATH=" + wd + "/containers"}
+	cniConfig, err := os.Open("./containers/cni_config.json")
+	if err != nil {
+		return "", fmt.Errorf("Failed to open cni config file: %s\n", err)
+	}
+	bridgeCmd.Stdin = cniConfig
+
+	out, err = bridgeCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("Failed connect container to bridge: %s, %s", err.(*exec.ExitError).Stderr, out)
+	}
+
+	var result map[string]map[string]string
+	json.Unmarshal(out, &result)
+	return result["ip4"]["ip"][0:10], nil
+}
+
+func UnbridgeContainer(containerId string) error {
+	unbridgeCmd := exec.Command(`./containers/bridge`)
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("Failed to get current working directory: %s\n", err)
+	}
+	unbridgeCmd.Env = []string{"CNI_COMMAND=DEL", "CNI_CONTAINERID=" + containerId, "CNI_NETNS=/run/netns/" + containerId, "CNI_IFNAME=eth0", "CNI_PATH=" + wd + "/containers"}
+	cniConfig, err := os.Open("./containers/cni_config.json")
+	if err != nil {
+		return fmt.Errorf("Failed to open cni config file: %s\n", err)
+	}
+	unbridgeCmd.Stdin = cniConfig
+
+	out, err := unbridgeCmd.Output()
+	if err != nil {
+		return fmt.Errorf("Failed deconnect container from bridge: %s, %s", err.(*exec.ExitError).Stderr, out)
+	}
+
+	out, err = exec.Command(`ip`, `netns`, `del`, containerId).Output()
+	if err != nil {
+		return fmt.Errorf("Error deleting network namespace: %s, %s\n", err.(*exec.ExitError).Stderr, out)
+	}
+
+	return nil
 }

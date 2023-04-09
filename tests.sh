@@ -51,9 +51,7 @@ cold_start_internal()
 
    # End server
    echo "Shutting down server..."
-   if ! kill -SIGINT $openfaas_pid ; then
-      exit
-   fi
+   curl 'localhost:8080/shutdown'
    wait $openfaas_pid
    sleep 2
 }
@@ -119,9 +117,7 @@ warm_start_internal()
 
    # End server
    echo "Shutting down server..."
-   if ! kill -SIGINT $openfaas_pid ; then	
-      exit	
-   fi
+   curl 'localhost:8080/shutdown'
    wait $openfaas_pid
    sleep 2
 }

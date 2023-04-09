@@ -150,6 +150,10 @@ func main() {
 	http.HandleFunc("/system/functions/", getFunctionSummary)
 	http.HandleFunc("/stats", getStats)
 	http.HandleFunc("/preBoot/", preBoot)
+	http.HandleFunc("/shutdown", func(w http.ResponseWriter, req *http.Request) {
+		go shutdown()
+		return
+	})
 
 	fmt.Printf("Server up!!\n")
 	err = http.ListenAndServe(":8080", nil)
@@ -167,13 +171,12 @@ func shutdown() {
 		// shutdown containers
 		for _, value := range functionInstanceMetadata {
 			contaienrId := value.containerId
-			// containers seem to kill themselves
-			// out, err := exec.Command(`runsc`, `kill`, contaienrId).Output()
-			// if err != nil {
-			// 	fmt.Printf("Failed delete container %s: %s, %s\n", contaienrId, err.(*exec.ExitError).Stderr, out)
-			// }
+			out, err := exec.Command(`runsc`, `kill`, contaienrId).Output()
+			if err != nil {
+				fmt.Printf("Failed delete container %s: %s, %s\n", contaienrId, err.(*exec.ExitError).Stderr, out)
+			}
 
-			err := Network.UnbridgeContainer(contaienrId)
+			err = Network.UnbridgeContainer(contaienrId)
 			if err != nil {
 				fmt.Printf("Failed unbridge container %s: %s\n", contaienrId, err)
 			}

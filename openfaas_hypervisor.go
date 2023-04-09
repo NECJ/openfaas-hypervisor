@@ -347,6 +347,7 @@ func runUnikernel(functionName string, metadata *InstanceMetadata) {
 
 func runContainer(functionName string, metadata *InstanceMetadata) {
 	metadata.containerId = uuid.New().String()
+	functionInstanceMetadata.Store(metadata.ip, metadata)
 
 	// set up networking
 	ip, err := Network.BridgeContainer(metadata.containerId)
@@ -382,7 +383,6 @@ func runContainer(functionName string, metadata *InstanceMetadata) {
 	// run container
 	runscCmd := exec.Command(`runsc`, `run`, `--bundle`, tempdir, metadata.containerId)
 	metadata.vmStartTime = time.Now()
-	functionInstanceMetadata.Store(metadata.ip, metadata)
 
 	err = runscCmd.Start()
 	if err != nil {

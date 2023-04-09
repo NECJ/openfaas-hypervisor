@@ -138,7 +138,15 @@
 					"allow": false,
 					"access": "rwm"
 				}
-			]
+			],
+			"cpu": {
+                "shares": 1024,
+                "quota": 1000000,
+                "period": 1000000,
+                "realtimeRuntime": 1000000,
+                "realtimePeriod": 1000000,
+                "idle": 1
+            }
 		},
 		"namespaces": [
 			{

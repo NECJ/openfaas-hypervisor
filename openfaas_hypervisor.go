@@ -347,7 +347,6 @@ func runUnikernel(functionName string, metadata *InstanceMetadata) {
 
 func runContainer(functionName string, metadata *InstanceMetadata) {
 	metadata.containerId = uuid.New().String()
-	functionInstanceMetadata.Store(metadata.ip, metadata)
 
 	// set up networking
 	ip, err := Network.BridgeContainer(metadata.containerId)
@@ -356,6 +355,7 @@ func runContainer(functionName string, metadata *InstanceMetadata) {
 		shutdown()
 	}
 	metadata.ip = ip
+	functionInstanceMetadata.Store(metadata.ip, metadata)
 
 	// create container directory
 	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-")

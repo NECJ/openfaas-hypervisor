@@ -13,3 +13,10 @@ do
 done
 
 sudo rm -r /tmp/openfaas-hypervisor-*
+for i in $(seq 0 9);
+do
+       for j in $(seq 0 9);
+       do
+               sudo rm -r /tmp/openfaas-hypervisor-vm${i}${j}*
+       done
+done

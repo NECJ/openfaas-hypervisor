@@ -10,15 +10,15 @@ cold_start()
       cold_start_internal $invokes
    done
 
-   for invokes in $(seq 60 10 100)
-   do
-      cold_start_internal $invokes
-   done
+   # for invokes in $(seq 60 10 100)
+   # do
+   #    cold_start_internal $invokes
+   # done
 
-   for invokes in $(seq 100 100 1000)
-   do
-      cold_start_internal $invokes
-   done
+   # for invokes in $(seq 100 100 1000)
+   # do
+   #    cold_start_internal $invokes
+   # done
 }
 
 cold_start_internal()
@@ -30,7 +30,7 @@ cold_start_internal()
    trap "kill -SIGINT $openfaas_pid" EXIT
 
    # Wait for server to start up
-   sleep 4
+   sleep 2
 
    # Invoke function
    curlPids=()
@@ -44,7 +44,7 @@ cold_start_internal()
       wait $pid
    done
 
-   sleep 4
+   sleep 2
 
    # Get stats
    curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .VmInitTimeNanoAvg, .VmInitTimeNanoStd, .VmInitTimeNano95, .VmInitTimeNanoMax, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd, .FuncExecTimeNano95, .FuncExecTimeNanoMax] | @csv' >> $datafile
@@ -55,7 +55,7 @@ cold_start_internal()
       exit
    fi
    wait $openfaas_pid
-   sleep 4
+   sleep 2
 }
 
 warm_start()
@@ -68,15 +68,15 @@ warm_start()
       warm_start_internal $invokes
    done
 
-   for invokes in $(seq 60 10 100)
-   do
-      warm_start_internal $invokes
-   done
+   # for invokes in $(seq 60 10 100)
+   # do
+   #    warm_start_internal $invokes
+   # done
 
-   for invokes in $(seq 100 100 1000)
-   do
-      warm_start_internal $invokes
-   done
+   # for invokes in $(seq 100 100 1000)
+   # do
+   #    warm_start_internal $invokes
+   # done
 }
 
 warm_start_internal() 
@@ -88,7 +88,7 @@ warm_start_internal()
    trap "kill -SIGINT $openfaas_pid" EXIT
 
    # Wait for server to start up
-   sleep 4
+   sleep 2
 
    # Pre-boot VMs
    curl -X POST --data-raw $1 'localhost:8080/preBoot/calc-pi'
@@ -112,7 +112,7 @@ warm_start_internal()
       wait $pid
    done
 
-   sleep 4
+   sleep 2
 
    # Get stats
    curl -s -X POST 'localhost:8080/stats' | jq -r '[.NumbInitVms, .FuncExecTimeNanoAvg, .FuncExecTimeNanoStd, .FuncExecTimeNano95, .FuncExecTimeNanoMax] | @csv' >> $datafile
@@ -123,7 +123,7 @@ warm_start_internal()
       exit	
    fi
    wait $openfaas_pid
-   sleep 4
+   sleep 2
 }
 
 help()

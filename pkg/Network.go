@@ -106,7 +106,8 @@ func BridgeContainer(containerId string) (string, error) {
 
 	var result map[string]map[string]string
 	json.Unmarshal(out, &result)
-	return result["ip4"]["ip"][0:10], nil
+	ip := strings.Split(result["ip4"]["ip"], "/")[0]
+	return ip, nil
 }
 
 func UnbridgeContainer(containerId string) error {

@@ -58,7 +58,8 @@ const (
 var ofhtype OFHTYPE
 
 // Maps from function instance IP to function metadata
-var functionInstanceMetadata sync.Map
+var functionInstanceMetadata map[string]*InstanceMetadata = make(map[string]*InstanceMetadata)
+var functionInstanceMetadataLock sync.Mutex = sync.Mutex{}
 
 // Maps from function name to a pool of ready instances
 var readyFunctionInstances map[string]*pkg.VmPool = make(map[string]*pkg.VmPool)
@@ -164,8 +165,8 @@ func main() {
 func shutdown() {
 	if ofhtype == CONTAINER {
 		// shutdown containers
-		functionInstanceMetadata.Range(func(key, value any) bool {
-			contaienrId := value.(*InstanceMetadata).containerId
+		for _, value := range functionInstanceMetadata {
+			contaienrId := value.containerId
 			// containers seem to kill themselves
 			// out, err := exec.Command(`runsc`, `kill`, contaienrId).Output()
 			// if err != nil {
@@ -176,16 +177,13 @@ func shutdown() {
 			if err != nil {
 				fmt.Printf("Failed unbridge container %s: %s\n", contaienrId, err)
 			}
-
-			return true
-		})
+		}
 	} else {
 		// shutdown VMs
-		functionInstanceMetadata.Range(func(key, value any) bool {
-			value.(*InstanceMetadata).process.Signal(os.Interrupt)
-			value.(*InstanceMetadata).process.Wait()
-			return true
-		})
+		for _, value := range functionInstanceMetadata {
+			value.process.Signal(os.Interrupt)
+			value.process.Wait()
+		}
 
 		// remove tap devices
 		val := tapIterator.Next()
@@ -256,8 +254,9 @@ func getReadyInstance(functionName string) (InstanceMetadata, error) {
 // Register that a function VM has booted and is ready to be invoked
 func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 	instanceIP := strings.Split((*r).RemoteAddr, ":")[0]
-	metadataAny, _ := functionInstanceMetadata.Load(instanceIP)
-	metadata := metadataAny.(*InstanceMetadata)
+	functionInstanceMetadataLock.Lock()
+	metadata := functionInstanceMetadata[instanceIP]
+	functionInstanceMetadataLock.Unlock()
 	timeElapsed := time.Now().Sub(metadata.vmStartTime)
 	condition, loaded := functionReadyConditions.LoadAndDelete(instanceIP)
 	if loaded {
@@ -271,7 +270,9 @@ func registerInstanceReady(w http.ResponseWriter, r *http.Request) {
 
 func runMicroVM(functionName string, metadata *InstanceMetadata) {
 	tapName, macAddr := configureVmNetworking(metadata)
-	functionInstanceMetadata.Store(metadata.ip, metadata)
+	functionInstanceMetadataLock.Lock()
+	functionInstanceMetadata[metadata.ip] = metadata
+	functionInstanceMetadataLock.Unlock()
 
 	ctx := context.Background()
 	// Setup socket path
@@ -331,7 +332,9 @@ func runMicroVM(functionName string, metadata *InstanceMetadata) {
 
 func runUnikernel(functionName string, metadata *InstanceMetadata) {
 	tapName, macAddr := configureVmNetworking(metadata)
-	functionInstanceMetadata.Store(metadata.ip, metadata)
+	functionInstanceMetadataLock.Lock()
+	functionInstanceMetadata[metadata.ip] = metadata
+	functionInstanceMetadataLock.Unlock()
 
 	kernelPath := fmt.Sprintf(kernelPathTemplate, functionName)
 	qemuCmd := exec.Command(`qemu-system-x86_64`, `-netdev`, `tap,id=en0,ifname=`+tapName+`,script=no,downscript=no`, `-device`, `virtio-net-pci,netdev=en0,mac=`+macAddr, `-kernel`, kernelPath, `-append`, `netdev.ipv4_addr=`+metadata.ip+` netdev.ipv4_gw_addr=`+bridgeIp+` netdev.ipv4_subnet_mask=255.255.255.0 -- `+bridgeIp, `-cpu`, `host`, `-smp`, `1`, `-enable-kvm`, `-nographic`, `-m`, `10M`)
@@ -355,7 +358,9 @@ func runContainer(functionName string, metadata *InstanceMetadata) {
 		shutdown()
 	}
 	metadata.ip = ip
-	functionInstanceMetadata.Store(metadata.ip, metadata)
+	functionInstanceMetadataLock.Lock()
+	functionInstanceMetadata[metadata.ip] = metadata
+	functionInstanceMetadataLock.Unlock()
 
 	// create container directory
 	tempdir, err := ioutil.TempDir("", "openfaas-hypervisor-")

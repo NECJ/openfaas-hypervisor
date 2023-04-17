@@ -219,7 +219,7 @@ func invokeFunction(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	res, err := http.Get("http://" + functionInstance.ip + ":8080/invoke")
+	res, err := http.Post("http://"+functionInstance.ip+":8080/invoke", "plain/text", req.Body)
 	if err != nil {
 		fmt.Printf("Error invoking function: %s\n", err)
 		http.Error(w, "Error invoking function", http.StatusInternalServerError)

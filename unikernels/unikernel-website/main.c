@@ -37,39 +37,39 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
-#include <time.h>
+#include <stdlib.h>
 
 #define HOST_PORT 8080
 #define LISTEN_PORT 8080
-static const char reply_template[] = "HTTP/1.1 200 OK\r\n" \
+static const char reply[] = "HTTP/1.1 200 OK\r\n" \
 			    "Content-type: text/html\r\n" \
 			    "Connection: close\r\n" \
 			    "\r\n" \
-			    "%.5f\n";
+			    "<html> \
+					<head> \
+						<title>FaaS Webpage</title> \
+					</head> \
+					<body> \
+						<h1 style=\"font-family: Source Sans Pro, Helvetica, sans-serif\">Hello from a unikernel 👋</h1> \
+						<p style=\"font-family: Source Sans Pro, Helvetica, sans-serif\">This webpage was served from a unikernel based FaaS platform.</p> \
+						<br/> \
+						<button onclick=\" \
+							const Http = new XMLHttpRequest(); \
+							const url='http://localhost:8080/function/fact'; \
+							Http.open(\'GET\', url); \
+							Http.send(); \
+							Http.onreadystatechange = (e) => { \
+								getElementById(\'fact\').innerHTML=Http.responseText \
+							} \
+						\">Click Me!</button> \
+						<p id=\"fact\"></p> \
+					</body> \
+				</html>\n";
 
 static const char readyMessage[] = "POST /ready HTTP/1.1\r\nHost: 8080\r\n\r\n";
 
 #define BUFLEN 2048
 static char recvbuf[BUFLEN];
-
-double compute_pi() {
-	struct timespec start={0,0};
-	struct timespec end={0,0};
-    clock_gettime(CLOCK_MONOTONIC, &start);
-
-    // compute pi
-    long reps = 1000000000;
-    double result = 3;
-    int op = 1;
-    for(long i=2; i<2*reps+1; i+=2) {
-        result += 4.0/(i*(i+1)*(i+2)*op);
-        op *= -1;
-    }
-
-	clock_gettime(CLOCK_MONOTONIC, &end);
-
-	return result;
-}
 
 void register_ready(char *ip) {
 	printf("Registering as Ready!\n");
@@ -172,8 +172,6 @@ int main(int argc, char *argv[])
 		}
 
 		/* Send reply */
-		char reply[strlen(reply_template)+4];
-		sprintf(reply, reply_template, compute_pi());
 		n = write(client, reply, sizeof(reply) - 1);
 		if (n < 0)
 			perror("Failed to send a reply: ");
